@@ -62,6 +62,7 @@ describe("units", () => {
     close(convert(100, "C", "F").value, 212);
     close(convert(1, "kN.m", "kip.ft").value, 0.73756);
     close(convert(1, "kN/m2", "psf").value, 20.885);
+    close(convert(5, "katha", "ft2").value, 3600, 0.01); close(convert(1, "bigha", "katha").value, 20, 0.01); close(convert(100, "cft", "m3").value, 2.8317, 0.01);
   });
   it("rejects cross-category", () => { expect(() => convert(1, "m", "kg")).toThrow(); });
 });

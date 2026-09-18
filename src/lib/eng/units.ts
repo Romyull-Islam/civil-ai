@@ -18,7 +18,7 @@ export type UnitCategory =
 // Factor to convert *from* the unit *to* the SI base of its category.
 const FACTORS: Record<UnitCategory, Record<string, number>> = {
   length: { m: 1, mm: 1e-3, cm: 1e-2, km: 1e3, in: 0.0254, ft: 0.3048, yd: 0.9144, mi: 1609.344 },
-  area: { "m2": 1, "mm2": 1e-6, "cm2": 1e-4, "ha": 1e4, "in2": 0.00064516, "ft2": 0.09290304, "yd2": 0.83612736, "acre": 4046.8564224 },
+  area: { "m2": 1, "mm2": 1e-6, "cm2": 1e-4, "ha": 1e4, "in2": 0.00064516, "ft2": 0.09290304, "yd2": 0.83612736, "acre": 4046.8564224, katha: 66.89, decimal: 40.4686, bigha: 1337.8, shotangsho: 40.4686 },
   volume: { "m3": 1, "mm3": 1e-9, "cm3": 1e-6, "L": 1e-3, "ft3": 0.028316846592, "yd3": 0.764554857984, "gal_us": 0.003785411784, "in3": 1.6387064e-5 },
   force: { N: 1, kN: 1e3, MN: 1e6, kgf: 9.80665, tf: 9806.65, lbf: 4.4482216152605, kip: 4448.2216152605 },
   stress: { Pa: 1, kPa: 1e3, MPa: 1e6, GPa: 1e9, "N/mm2": 1e6, "kN/m2": 1e3, psi: 6894.757293168, ksi: 6894757.293168, "kgf/cm2": 98066.5, bar: 1e5 },
@@ -47,7 +47,10 @@ function normalize(u: string): string {
     .replace(/^feet$|^foot$/i, "ft")
     .replace(/^inch(es)?$/i, "in")
     .replace(/^sqm$|^m\^2$/i, "m2")
-    .replace(/^sqft$|^ft\^2$/i, "ft2")
+    .replace(/^sqft$|^ft\^2$|^sft$/i, "ft2")
+    .replace(/^kathas?$|^katha$/i, "katha")
+    .replace(/^decimals?$|^dec$/i, "decimal")
+    .replace(/^bighas?$/i, "bigha")
     .replace(/^cum$|^m\^3$/i, "m3")
     .replace(/^cft$|^ft\^3$/i, "ft3")
     .replace(/^tonnes?$/i, "t")

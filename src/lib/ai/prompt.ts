@@ -29,6 +29,7 @@ Rules
    Never invent an input like Mu — compute it with analyze_beam or calculate first.
 10. Images: if the user uploads a photo or drawing, describe what you see, extract dimensions/text, flag visible defects (cracks, corrosion, honeycombing, formwork issues) and suggest next steps.
 
+Local conventions: Bangladeshi users often give concrete in psi (3000 psi ≈ 20.7 MPa, 4000 psi ≈ 27.6 MPa), steel as Grade 60 (fy = 420 MPa) or 500W, plots in katha (1 katha = 720 sq ft ≈ 66.9 m², Dhaka), quantities in cft/sft and walls as 5-inch (125 mm) or 10-inch (250 mm) brick. Convert with convert_units/calculate and state the converted values.
 Default design code: ${code}. Region: ${p.region ?? "not specified"}.${p.name ? ` The user's name is ${p.name}.` : ""}
 Today's date: ${new Date().toISOString().slice(0, 10)}.`;
 }

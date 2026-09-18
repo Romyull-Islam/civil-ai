@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
-import { Send, Square, Plus, Trash2, ImagePlus, X, Sparkles, Download, Upload, CloudUpload } from "lucide-react";
+import { Send, Square, Plus, Trash2, ImagePlus, X, Sparkles, Download, Upload, CloudUpload, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { db, type Conversation, type UIMessage } from "@/lib/db";
 import { useSettings } from "@/lib/client/settings";
 import { streamChat } from "@/lib/client/stream";
@@ -12,13 +12,18 @@ import { PROVIDERS } from "@/lib/ai/registry";
 import { LocalAI } from "./LocalAI";
 import { ModelPicker } from "./ModelPicker";
 import { useSession, refreshSession } from "@/lib/client/session";
+import { usePersistedFlag } from "@/lib/client/persist";
 
 const SUGGESTIONS = [
-  "Design a simply supported RC beam, 6 m span, 300×500 mm, carrying 25 kN/m factored UDL, M25/Fe500 per IS 456, then draw the section.",
-  "How many cement bags, sand and aggregate for 12 m³ of M20 concrete?",
-  "Analyze a 4 m cantilever with a 15 kN point load at the tip and 5 kN/m UDL. Steel section ISMB 300.",
-  "Size an isolated footing for a 400×400 column carrying 900 kN service load; SBC 180 kN/m².",
-  "What is the minimum cover and minimum steel for a slab per IS 456? Cite clauses.",
+  "Design a 10\"×18\" (250×450 mm) RC beam, 16 ft span, 1.2 kip/ft factored load, 3000 psi concrete and Grade 60 steel per BNBC 2020, then draw the section.",
+  "Plan a 2-storey house on a 5 katha plot in Dhaka (3 bedrooms, garage, dining) with RAJUK setbacks; show coverage and FAR, then draw the floor plans.",
+  "How many bags of cement, cft of sand and cft of stone chips for 100 cft of 1:2:4 (M20) concrete?",
+  "Estimate bricks, cement and sand for a 10-inch brick wall 30 ft long and 10 ft high with 12 mm plaster both sides.",
+  "What are the seismic zone coefficient and basic wind speed for Chittagong per BNBC 2020? Cite the clauses.",
+  "Size an isolated footing for a 15\"×15\" column carrying 120 kip service load; allowable bearing 2 ksf; 3000 psi concrete.",
+  "Design a simply supported RC beam, 6 m span, 300×500 mm, 25 kN/m factored UDL, M25/Fe500 per IS 456, then draw the section.",
+  "Analyze a 4 m cantilever with a 15 kN point load at the tip and 5 kN/m UDL and check an ISMB 300 section.",
+  "What is the minimum cover and minimum steel for a one-way slab? Compare BNBC 2020, IS 456 and ACI 318 with clause numbers.",
   "Draw a floor plan: living 4.5×5.5 m, kitchen 3×3.5 m, bedroom 3.6×4.2 m, bath 2×2.4 m.",
 ];
 
@@ -53,6 +58,8 @@ export function Chat() {
     return () => { alive = false; };
   }, [settings.autoDeleteDays]);
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
+  const [listHidden, toggleList] = usePersistedFlag("civil-ai.chatlist.hidden", false);
+  const listOpen = !listHidden;
   const backup = async (c: Conversation, silent = false) => {
     const r = await fetch("/api/saves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id, kind: "chat", title: c.title, payload: c }) });
     const j = await r.json();
@@ -127,8 +134,8 @@ export function Chat() {
 
   return (
     <div className="flex h-full min-h-0">
-      <aside className="hidden lg:flex w-64 shrink-0 flex-col border-r border-border">
-        <div className="p-2"><button className="btn w-full justify-center" onClick={newConversation}><Plus size={16} /> New chat</button></div>
+      <aside className={`${listOpen ? "hidden lg:flex w-64" : "hidden"} shrink-0 flex-col border-r border-border`}>
+        <div className="p-2 flex gap-1"><button className="btn flex-1 justify-center" onClick={newConversation}><Plus size={16} /> New chat</button><button className="btn" onClick={toggleList} title="Hide chat history"><PanelLeftClose size={16} /></button></div>
         <div className="flex-1 overflow-y-auto px-2 pb-2 grid content-start gap-1">
           {convs.map((c) => (
             <div key={c.id} className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm cursor-pointer ${conv?.id === c.id ? "bg-elev2" : "hover:bg-elev2"}`} onClick={() => openConversation(c.id)}>
@@ -146,14 +153,16 @@ export function Chat() {
           <div className="text-muted">Auto-delete after {settings.autoDeleteDays > 0 ? `${settings.autoDeleteDays} days unused` : "never"} (change in Settings)</div>
         </div>
       </aside>
-      <section className="flex-1 min-w-0 flex flex-col">
+      <section className="flex-1 min-w-0 flex flex-col relative">
+        {!listOpen && <button className="hidden lg:flex absolute top-2 left-2 z-10 btn btn-sm" onClick={toggleList} title="Show chat history"><PanelLeftOpen size={15} /> History</button>}
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-3xl mx-auto px-4 py-6 grid gap-4">
+          <div className="max-w-4xl mx-auto px-4 py-6 grid gap-4">
             {!conv && (
               <div className="grid gap-4 mt-6">
                 <div className="text-center">
                   <Sparkles className="inline text-accent" size={28} />
                   <h1 className="text-xl font-semibold mt-2">What are we building today?</h1>
+                  <p className="text-xs text-muted mt-1">Common Bangladeshi jobs first (BNBC 2020, RAJUK, psi / katha / cft), then international examples.</p>
                   <p className="text-sm text-muted mt-1">Ask for designs, analysis, drawings, quantities, code clauses or site advice. Calculations run in verified engineering tools, not in the language model.</p>
                   {session?.mode === "byok" && <p className="text-xs text-muted mt-2">No key yet? Open Settings and add a free Gemini or Groq key, or run Ollama locally.</p>}
                   {session?.mode === "desktop" && <p className="text-xs text-muted mt-2">Works offline with the built-in model. Link your Civil AI account in Settings for stronger cloud models.</p>}
@@ -169,8 +178,8 @@ export function Chat() {
             <div ref={bottomRef} />
           </div>
         </div>
-        <div className="border-t border-border bg-elev">
-          <div className="max-w-3xl mx-auto p-3 grid gap-2">
+        <div className="border-t border-border bg-bg/80 backdrop-blur">
+          <div className="max-w-4xl mx-auto px-4 pt-3 pb-5 grid gap-2">
             {images.length > 0 && (
               <div className="flex gap-2 flex-wrap">
                 {images.map((im, i) => (
@@ -182,24 +191,24 @@ export function Chat() {
                 ))}
               </div>
             )}
-            <div className="flex items-end gap-2">
-              <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => addImages(e.target.files)} />
-              <button className="btn" onClick={() => fileRef.current?.click()} title="Attach site photo / drawing image"><ImagePlus size={16} /></button>
+            <div className="rounded-2xl border border-border bg-elev shadow-lg shadow-black/20 focus-within:border-accent2 transition">
               <textarea
-                className="textarea min-h-11 max-h-48 resize-y"
-                placeholder="Ask anything — e.g. “design a 230×450 beam for 80 kN·m”, “draw a 400×400 column with 8T16”… (Enter to send, Shift+Enter for newline)"
+                className="w-full bg-transparent border-0 outline-none resize-none px-4 pt-4 pb-2 text-base leading-6 min-h-[64px] max-h-[240px] placeholder:text-muted"
+                placeholder="Ask anything — design a 230×450 beam for 80 kN·m, draw a 400×400 column with 8T16, plan a 2-storey house on a 10×12 m plot…"
                 value={input}
-                rows={1}
-                onChange={(e) => setInput(e.target.value)}
+                rows={2}
+                onChange={(e) => { setInput(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(240, e.target.scrollHeight) + "px"; }}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
                 onPaste={(e) => { if (e.clipboardData.files.length) addImages(e.clipboardData.files); }}
               />
-              {busy ? <button className="btn" onClick={stop} title="Stop"><Square size={16} /></button> : <button className="btn btn-primary" onClick={() => send()} disabled={!input.trim() && !images.length}><Send size={16} /></button>}
+              <div className="flex items-center gap-2 px-2 pb-2">
+                <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => addImages(e.target.files)} />
+                <button className="btn btn-sm" onClick={() => fileRef.current?.click()} title="Attach a site photo or drawing image"><ImagePlus size={16} /> <span className="hidden sm:inline">Image</span></button>
+                <div className="flex-1 min-w-0 flex items-center gap-3"><ModelPicker /><span className="text-[11px] text-muted hidden md:inline">Code: {settings?.preferences.designCode}</span></div>
+                {busy ? <button className="btn" onClick={stop} title="Stop"><Square size={16} /> Stop</button> : <button className="btn btn-primary rounded-xl px-4 py-2" onClick={() => send()} disabled={!input.trim() && !images.length} title="Send (Enter)"><Send size={16} /> <span className="hidden sm:inline">Send</span></button>}
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <ModelPicker />
-              <span className="text-[11px] text-muted">Code: {settings?.preferences.designCode}</span>
-            </div>
+            <div className="text-[11px] text-muted text-center">Enter to send · Shift+Enter for a new line · results are preliminary and must be checked by a licensed engineer</div>
           </div>
         </div>
       </section>

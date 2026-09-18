@@ -182,7 +182,7 @@ export const TOOLS: ToolDef[] = [
   def({
     name: "convert_units",
     category: "utility",
-    description: `Convert engineering units. Categories: ${Object.entries(UNIT_CATALOG).map(([k, v]) => `${k} (${v.join(", ")})`).join("; ")}.`,
+    description: `Convert engineering units (incl. Bangladeshi land units: katha = 720 sq ft, decimal/shotangsho = 435.6 sq ft, bigha = 20 katha; cft = ft3, sft = ft2). Categories: ${Object.entries(UNIT_CATALOG).map(([k, v]) => `${k} (${v.join(", ")})`).join("; ")}.`,
     schema: z.object({ value: z.number(), from: z.string(), to: z.string() }),
     run: (inp) => { const r = convert(inp.value, inp.from, inp.to); return { result: { ...r, from: inp.from, to: inp.to, input: inp.value }, summary: `${inp.value} ${inp.from} = ${r.value.toPrecision(6)} ${inp.to}` }; },
   }),
