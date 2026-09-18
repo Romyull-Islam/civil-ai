@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
 import { Send, Square, Plus, Trash2, ImagePlus, X, Sparkles, Download, Upload, CloudUpload, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { db, type Conversation, type UIMessage } from "@/lib/db";
@@ -49,7 +50,7 @@ export function Chat() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const refreshList = useCallback(() => { db.conversations.orderBy("updatedAt").reverse().limit(100).toArray().then((rows) => setConvs(rows)); }, []);
+  const refreshList = useCallback(() => { db.conversations.orderBy("updatedAt").reverse().limit(100).toArray().then((rows) => { setConvs(rows); window.dispatchEvent(new Event("civil-ai:conversations")); }); }, []);
   useEffect(() => {
     let alive = true;
     const days = settings.autoDeleteDays;
@@ -72,6 +73,12 @@ export function Chat() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [conv?.messages.length, status]);
 
   const persist = useCallback(async (c: Conversation) => { await db.conversations.put(c); refreshList(); }, [refreshList]);
+  const params = useSearchParams(); const router = useRouter();
+  useEffect(() => {
+    const c = params.get("c"); const fresh = params.get("new");
+    if (fresh) queueMicrotask(() => { setConv(null); setInput(""); setImages([]); router.replace("/"); });
+    else if (c) db.conversations.get(c).then((row) => { if (row) setConv(row); router.replace("/"); });
+  }, [params, router]);
 
   const newConversation = () => { setConv(null); setInput(""); setImages([]); };
   const openConversation = async (id: string) => { const c = await db.conversations.get(id); if (c) { setConv(c); db.conversations.update(id, { updatedAt: now() }).catch(() => {}); } };
