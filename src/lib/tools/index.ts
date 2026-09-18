@@ -132,9 +132,27 @@ export const TOOLS: ToolDef[] = [
   def({
     name: "concrete_materials",
     category: "quantities",
-    description: `Cement (bags), sand and aggregate for a volume of nominal-mix concrete (${Object.keys(NOMINAL_MIXES).join(", ")}).`,
-    schema: z.object({ volume: z.number().positive().describe("m³ wet concrete"), grade: z.string().describe("e.g. M20"), wastagePercent: z.number().default(3) }),
-    run: (inp) => { const r = concreteMaterials(inp.volume, inp.grade, inp.wastagePercent); return { result: r, display: { kind: "table", title: `${r.grade} (${r.ratio}) for ${inp.volume} m³`, columns: ["Material", "Quantity"], rows: [["Cement", `${r.cement.bags} bags (${r.cement.kg.toFixed(0)} kg)`], ["Sand", `${r.sand.m3.toFixed(2)} m³ (${r.sand.cft.toFixed(1)} cft)`], ["Aggregate", `${r.aggregate.m3.toFixed(2)} m³ (${r.aggregate.cft.toFixed(1)} cft)`], ["Water", `${r.water.liters.toFixed(0)} L`]] }, summary: `${r.cement.bags} bags cement, ${r.sand.m3.toFixed(2)} m³ sand, ${r.aggregate.m3.toFixed(2)} m³ aggregate` }; },
+    description: `Cement (50 kg bags), sand and coarse aggregate (stone chips) for nominal/volume-mix concrete. Pass the mix ratio exactly as the user wrote it (e.g. "1:2:4"), or a grade (${Object.keys(NOMINAL_MIXES).join(", ")}) when no ratio is given. Takes the volume in m³ or cft; no unit conversion needed. Returns worked steps.`,
+    schema: z.object({
+      volume: z.number().positive().describe("wet concrete volume, in volumeUnit"),
+      volumeUnit: z.enum(["m3", "cft"]).default("m3"),
+      ratio: z.string().optional().describe('cement:sand:aggregate by volume, e.g. "1:2:4". Takes priority over grade.'),
+      grade: z.string().optional().describe("e.g. M20; used when no ratio is given"),
+      wastagePercent: z.number().default(3),
+    }),
+    run: (inp) => {
+      const mix = inp.ratio ?? inp.grade;
+      if (!mix) throw new Error("Give a ratio (e.g. 1:2:4) or a grade (e.g. M20).");
+      const r = concreteMaterials(inp.volume, mix, inp.wastagePercent, { unit: inp.volumeUnit, grade: inp.ratio ? inp.grade : undefined });
+      const cft = r.unit === "cft";
+      const q = (x: { m3: number; cft: number }) => (cft ? `${x.cft.toFixed(1)} cft (${x.m3.toFixed(2)} m³)` : `${x.m3.toFixed(2)} m³ (${x.cft.toFixed(1)} cft)`);
+      const u = cft ? "cft" : "m³";
+      return {
+        result: r,
+        display: { kind: "table", title: `${r.ratio}${r.grade ? ` (${r.grade})` : ""} concrete, ${inp.volume} ${u}, wastage ${inp.wastagePercent}%`, columns: ["Material", "Quantity"], rows: [["Cement", `${r.cement.bags} bags of 50 kg (${r.cement.bagsExact.toFixed(1)} exact, ${r.cement.kg.toFixed(0)} kg)`], ["Sand", q(r.sand)], ["Stone chips / aggregate", q(r.aggregate)], ["Water", `${r.water.liters.toFixed(0)} L`]] },
+        summary: `${r.ratio}: ${r.cement.bags} bags cement, sand ${q(r.sand)}, stone chips ${q(r.aggregate)}`,
+      };
+    },
   }),
   def({
     name: "rebar_schedule",

@@ -125,6 +125,18 @@ describe("quantities", () => {
     expect(r.cement.bags).toBeGreaterThanOrEqual(8);
     expect(r.cement.bags).toBeLessThanOrEqual(9);
   });
+  it("100 cft of 1:2:4 without wastage: 22 cft cement (~18 bags), 44 cft sand, 88 cft chips", () => {
+    const r = concreteMaterials(100, "1:2:4", 0, { unit: "cft", grade: "M20" });
+    expect(r.ratio).toBe("1:2:4");
+    expect(r.grade).toBe("M15");
+    close(r.cement.cft, 22, 0.01); close(r.sand.cft, 44, 0.01); close(r.aggregate.cft, 88, 0.01);
+    expect(r.cement.bags).toBe(18);
+    expect(r.notes[0]).toMatch(/M20 is 1:1.5:3/);
+  });
+  it("ratio takes priority over grade in the tool", async () => {
+    const out = await runTool("concrete_materials", { volume: 100, volumeUnit: "cft", ratio: "1:2:4", grade: "M20" });
+    expect((out.result as { ratio: string }).ratio).toBe("1:2:4");
+  });
   it("rebar 12 mm = 0.888 kg/m", () => { close(rebarKgPerM(12), 0.888, 0.01); });
   it("bricks ≈ 500 per m³", () => { close(brickMasonry(1).bricksPerM3, 500, 0.02); });
 });

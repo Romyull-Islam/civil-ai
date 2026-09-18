@@ -14,24 +14,69 @@ export const CEMENT_DENSITY = 1440; // kg/m³ (bulk)
 export const DRY_VOLUME_FACTOR = 1.54;
 export const STEEL_DENSITY = 7850;
 
-export function concreteMaterials(volume: number, grade: keyof typeof NOMINAL_MIXES | string, wastagePercent = 3) {
-  const key = grade.replace(".", "_").toUpperCase();
-  const mix = NOMINAL_MIXES[key];
-  if (!mix) throw new Error(`Unknown nominal mix "${grade}". Use one of ${Object.keys(NOMINAL_MIXES).join(", ")}. For M30+ use design mix.`);
-  const dry = volume * DRY_VOLUME_FACTOR * (1 + wastagePercent / 100);
-  const sum = mix.cement + mix.sand + mix.aggregate;
-  const cementVol = (dry * mix.cement) / sum;
-  const cementKg = cementVol * CEMENT_DENSITY;
+export const CFT_PER_M3 = 35.3147;
+
+/** Parse "M20" or a volume ratio like "1:2:4" / "1 : 1.5 : 3" into cement:sand:aggregate parts. */
+export function parseMix(mix: string): { cement: number; sand: number; aggregate: number; grade?: string } {
+  const parts = mix.split(/\s*[:：]\s*/).map(Number);
+  if (parts.length === 3 && parts.every((n) => Number.isFinite(n) && n > 0)) {
+    const [cement, sand, aggregate] = parts.map((n) => n / parts[0]);
+    const grade = Object.entries(NOMINAL_MIXES).find(([, m]) => m.sand === sand && m.aggregate === aggregate)?.[0];
+    return { cement, sand, aggregate, grade };
+  }
+  const key = mix.trim().replace(".", "_").toUpperCase();
+  const m = NOMINAL_MIXES[key];
+  if (!m) throw new Error(`Unknown mix "${mix}". Give a ratio such as 1:2:4, or one of ${Object.keys(NOMINAL_MIXES).join(", ")}. For M30+ use a design mix.`);
+  return { ...m, grade: key };
+}
+
+const fmt = (n: number, d = 2) => Number(n.toFixed(d)).toString();
+const ratioText = (m: { sand: number; aggregate: number }) => `1:${fmt(m.sand)}:${fmt(m.aggregate)}`;
+
+/**
+ * Cement, sand and aggregate for a volume of nominal (volume-batched) concrete.
+ * `mix` is a ratio ("1:2:4") or a grade ("M20"). When both are known and disagree, the ratio wins and a note says so.
+ */
+export function concreteMaterials(volume: number, mix: string, wastagePercent = 3, opts: { unit?: "m3" | "cft"; grade?: string } = {}) {
+  const m = parseMix(mix);
+  const notes: string[] = [];
+  if (opts.grade) {
+    const g = opts.grade.trim().replace(".", "_").toUpperCase();
+    const named = NOMINAL_MIXES[g];
+    if (named && (named.sand !== m.sand || named.aggregate !== m.aggregate))
+      notes.push(`In IS 456 nominal mixes ${g} is ${ratioText(named)} and ${ratioText(m)} is ${m.grade ?? "not a standard grade"}. Quantities use ${ratioText(m)} as given; the strength of a volume mix depends on the materials, so confirm it with cylinder or cube tests.`);
+  }
+  const cft = opts.unit === "cft";
+  const wetM3 = cft ? volume / CFT_PER_M3 : volume;
+  const dry = wetM3 * DRY_VOLUME_FACTOR * (1 + wastagePercent / 100);
+  const sum = m.cement + m.sand + m.aggregate;
+  const cementM3 = (dry * m.cement) / sum;
+  const cementKg = cementM3 * CEMENT_DENSITY;
+  const bagsExact = cementKg / CEMENT_BAG_KG;
+  const sandM3 = (dry * m.sand) / sum;
+  const aggM3 = (dry * m.aggregate) / sum;
+  const u = cft ? "cft" : "m³";
+  const inU = (x: number) => (cft ? x * CFT_PER_M3 : x);
+  const steps = [
+    `Wet volume ${fmt(volume)} ${u}${cft ? ` = ${fmt(wetM3, 3)} m³` : ""}`,
+    `Dry volume = ${fmt(volume)} × ${DRY_VOLUME_FACTOR}${wastagePercent ? ` × ${fmt(1 + wastagePercent / 100)} (wastage ${wastagePercent}%)` : ""} = ${fmt(inU(dry), 1)} ${u}`,
+    `Mix ${ratioText(m)}, sum of parts = ${fmt(sum)}`,
+    `Cement = ${fmt(inU(dry), 1)} × 1/${fmt(sum)} = ${fmt(inU(cementM3), 2)} ${u} → × ${CEMENT_DENSITY} kg/m³ = ${fmt(cementKg, 0)} kg ÷ ${CEMENT_BAG_KG} kg = ${fmt(bagsExact, 1)} bags → ${Math.ceil(bagsExact)} bags`,
+    `Sand = ${fmt(inU(dry), 1)} × ${fmt(m.sand)}/${fmt(sum)} = ${fmt(inU(sandM3), 1)} ${u}`,
+    `Coarse aggregate (stone chips) = ${fmt(inU(dry), 1)} × ${fmt(m.aggregate)}/${fmt(sum)} = ${fmt(inU(aggM3), 1)} ${u}`,
+  ];
   return {
-    grade: key,
-    ratio: `1:${mix.sand}:${mix.aggregate}`,
+    grade: m.grade ?? null,
+    ratio: ratioText(m),
     wetVolume: volume,
-    dryVolume: dry,
-    cement: { m3: cementVol, kg: cementKg, bags: Math.ceil(cementKg / CEMENT_BAG_KG) },
-    sand: { m3: (dry * mix.sand) / sum, cft: ((dry * mix.sand) / sum) * 35.3147 },
-    aggregate: { m3: (dry * mix.aggregate) / sum, cft: ((dry * mix.aggregate) / sum) * 35.3147 },
+    unit: cft ? "cft" : "m3",
+    dryVolume: inU(dry),
+    cement: { m3: cementM3, cft: cementM3 * CFT_PER_M3, kg: cementKg, bagsExact, bags: Math.ceil(bagsExact) },
+    sand: { m3: sandM3, cft: sandM3 * CFT_PER_M3 },
+    aggregate: { m3: aggM3, cft: aggM3 * CFT_PER_M3 },
     water: { liters: cementKg * 0.5 },
-    notes: [`Dry volume factor ${DRY_VOLUME_FACTOR}, wastage ${wastagePercent}%`, "Water/cement ratio assumed 0.5 for estimate."],
+    steps,
+    notes: [...notes, `Dry volume factor ${DRY_VOLUME_FACTOR}, wastage ${wastagePercent}%, cement bag ${CEMENT_BAG_KG} kg (${fmt(CEMENT_BAG_KG / CEMENT_DENSITY * CFT_PER_M3)} cft) at ${CEMENT_DENSITY} kg/m³.`, "Water/cement ratio 0.5 assumed for the estimate."],
   };
 }
 
