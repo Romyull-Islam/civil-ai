@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Civil-engineering benchmark for any configured provider.
- * Usage: node scripts/eval.mjs --provider local --model qwen3.5-4b [--base http://localhost:3001] [--only beam,units]
+ * Usage: node scripts/eval.mjs --provider local --model qwen3.5-4b [--base http://localhost:3001] [--only beam,units] [--delay 8]
  * Each task sends a realistic engineer request and checks (a) the right tools were called and (b) the numbers
  * in tool outputs match hand-verified answers. Scores are written to docs/eval-results.json.
  */
@@ -38,7 +38,7 @@ async function run(task) {
   const res = await fetch(`${BASE}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", parts: [{ type: "text", text: task.prompt }] }], provider, model, keys }) });
   const raw = await res.text();
   const evs = raw.split("\n").filter((l) => l.startsWith("data: ")).map((l) => { try { return JSON.parse(l.slice(6)); } catch { return null; } }).filter(Boolean);
-  const outputs = {}; const called = []; const notices = []; let text = ""; let error = null; let served = "";
+  const outputs = {}; const called = []; const notices = []; let text = ""; let error = null; let served = ""; let usage = null;
   for (const e of evs) {
     if (e.type === "tool_call") called.push(e.name);
     if (e.type === "tool_result" && !e.output.error) outputs[e.name] = e.output;
@@ -46,7 +46,7 @@ async function run(task) {
     if (e.type === "text_replace") text = e.text;
     if (e.type === "error") error = e.message;
     if (e.type === "notice") notices.push(e.message);
-    if (e.type === "done") served = `${e.provider}/${e.model}`;
+    if (e.type === "done") { served = `${e.provider}/${e.model}`; usage = e.usage; }
   }
   const toolsOk = task.tools.every((t) => called.includes(t));
   let valueOk = false; try { valueOk = !!task.check(outputs, text); } catch { valueOk = false; }
@@ -54,20 +54,23 @@ async function run(task) {
   const grounded = !notices.some((n) => /did not come from a calculation/.test(n));
   const retried = notices.some((n) => /Double-checking/.test(n));
   const answered = text.trim().length > 40;
-  return { id: task.id, seconds: Math.round((Date.now() - t0) / 1000), ok: valueOk && grounded && answered, toolsOk, valueOk, grounded, retried, called, error, served, answered };
+  return { id: task.id, seconds: Math.round((Date.now() - t0) / 1000), ok: valueOk && grounded && answered, tokens: usage ? { input: usage.input, output: usage.output } : null, toolsOk, valueOk, grounded, retried, called, error, served, answered };
 }
 
 const only = args.only ? args.only.split(",") : null;
 const results = [];
 for (const task of TASKS.filter((t) => !only || only.includes(t.id))) {
+  if (results.length && args.delay) await new Promise((res) => setTimeout(res, Number(args.delay) * 1000));
   const r = await run(task);
   results.push(r);
   const why = [!r.answered && "no answer", !r.grounded && "invented figures", r.retried && "self-corrected", r.error && "error=" + r.error.slice(0, 80)].filter(Boolean).join(", ");
   console.log(`${r.ok ? "PASS" : r.toolsOk ? "PARTIAL" : "FAIL"}  ${r.id.padEnd(14)} ${String(r.seconds).padStart(4)}s  tools=${r.called.join(",") || "-"}${why ? "  (" + why + ")" : ""}`);
 }
 const score = results.filter((r) => r.ok).length;
-const summary = { provider, model, served: results[0]?.served, date: new Date().toISOString(), score: `${score}/${results.length}`, avgSeconds: Math.round(results.reduce((s, r) => s + r.seconds, 0) / results.length), results };
-console.log(`\nScore ${summary.score} correct · avg ${summary.avgSeconds}s per task · ${summary.served}`);
+const withTokens = results.filter((r) => r.tokens);
+const avgTokens = withTokens.length ? { input: Math.round(withTokens.reduce((s, r) => s + r.tokens.input, 0) / withTokens.length), output: Math.round(withTokens.reduce((s, r) => s + r.tokens.output, 0) / withTokens.length) } : null;
+const summary = { provider, model, served: results[0]?.served, date: new Date().toISOString(), score: `${score}/${results.length}`, avgSeconds: Math.round(results.reduce((s, r) => s + r.seconds, 0) / results.length), avgTokens, results };
+console.log(`\nScore ${summary.score} correct · avg ${summary.avgSeconds}s per task · ${avgTokens ? `avg ${avgTokens.input} in / ${avgTokens.output} out tokens · ` : ""}${summary.served}`);
 const file = "docs/eval-results.json";
 const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : [];
 all.push(summary);

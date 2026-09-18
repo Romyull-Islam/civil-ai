@@ -9,7 +9,7 @@ const MAP: Record<string, FriendlyModel> = {
   "gemini/gemini-2.5-flash": { name: "Gemini 2.5 Flash", tier: "smart", blurb: "Balanced reasoning and speed", vision: true },
   "groq/openai/gpt-oss-20b": { name: "GPT-OSS 20B", tier: "fast", blurb: "Very fast; everyday calculations" },
   "groq/openai/gpt-oss-120b": { name: "GPT-OSS 120B", tier: "smart", blurb: "Strong engineering reasoning and tool use" },
-  "groq/qwen/qwen3.6-27b": { name: "Qwen 3.6 Vision", tier: "smart", blurb: "Reads site photos, drawings and tables", vision: true },
+  "groq/qwen/qwen3.8-27b": { name: "Qwen 3.8 Vision", tier: "smart", blurb: "Reads site photos, drawings and tables", vision: true },
   "qwen/qwen-flash": { name: "Qwen Flash", tier: "fast", blurb: "Fast and economical" },
   "qwen/qwen-plus": { name: "Qwen Plus", tier: "smart", blurb: "Balanced quality and speed" },
   "qwen/qwen3.6-plus": { name: "Qwen 3.6 Plus", tier: "smart", blurb: "Strong on tables, codes and long answers", vision: true },

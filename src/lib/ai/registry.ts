@@ -32,7 +32,7 @@ export const PROVIDERS: ProviderInfo[] = [
     models: [
       { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B", free: true, note: "best free reasoning + tools" },
       { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B", free: true },
-      { id: "qwen/qwen3.6-27b", label: "Qwen 3.6 27B (vision)", free: true, vision: true },
+      { id: "qwen/qwen3.8-27b", label: "Qwen 3.8 27B (vision)", free: true, vision: true },
     ] },
   { id: "openrouter", label: "OpenRouter", kind: "openai", keyEnv: "OPENROUTER_API_KEY", keyUrl: "https://openrouter.ai/settings/keys", baseUrl: "https://openrouter.ai/api/v1", freeTier: "':free' models: 20 req/min, 50 req/day (1,000/day after a one-time $10 top-up). List rotates weekly.", requiresKey: true,
     models: [

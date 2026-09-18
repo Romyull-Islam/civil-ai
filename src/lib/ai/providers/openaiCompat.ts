@@ -69,6 +69,8 @@ export function makeOpenAICompatProvider(providerId: string): Provider {
         if (e instanceof OpenAI.AuthenticationError || e instanceof OpenAI.PermissionDeniedError) throw new ProviderUnavailableError(`${providerId} API key invalid`, providerId, "auth");
         if (e instanceof OpenAI.NotFoundError) throw new ProviderUnavailableError(`${providerId} model not found: ${req.model}`, providerId, "model");
         if (e instanceof OpenAI.APIConnectionError) throw new ProviderUnavailableError(`Cannot reach ${providerId} (${req.baseUrl ?? "default URL"})`, providerId, "network");
+        if (e instanceof OpenAI.APIError && e.status === 413) throw new ProviderUnavailableError(`${providerId}: request larger than the account's token limit`, providerId, "rate_limit");
+        if (e instanceof OpenAI.APIError && e.status === 400 && /tool_use_failed|tool call validation failed|parsing failed/i.test(e.message)) throw new ProviderUnavailableError(`${providerId}: the model produced an invalid tool call`, providerId, "other");
         if (e instanceof OpenAI.APIError && (e.status === 402 || e.status === 503 || e.status === 529)) throw new ProviderUnavailableError(`${providerId}: ${e.message.slice(0, 200)}`, providerId, "other");
         throw e;
       }

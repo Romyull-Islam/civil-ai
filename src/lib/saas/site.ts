@@ -46,7 +46,9 @@ export const DEFAULT_SITE: SiteSettings = {
 
 **What is CivilMate?** An assistant for civil, structural and construction engineers and architects. Calculations are done by verified engineering code; the AI explains, selects the right calculator and draws.
 
-**Is it free?** Calculators, drawings and the code library are free. The AI assistant has a free daily allowance; Pro and Business plans give more requests, stronger models and the offline desktop model.
+**Is it free?** Calculators, drawings and the code library are free and unlimited. The AI assistant has a free monthly allowance of AI credits; Pro, Max and Team plans give more credits, stronger models and the offline desktop model.
+
+**What are AI credits?** Each AI answer uses credits according to the model you pick and how much it has to read and write. A quick question on a Fast model uses about 1 credit; the Best models use about 10. The chooser under the chat box shows the typical cost of each model, and your remaining credits. Plans have a monthly allowance and a daily allowance (refreshed at 06:00 Bangladesh time). The offline model in the desktop app does not use credits.
 
 **How do I pay?** bKash / Nagad / Rocket / Bangla QR / bank transfer (see the Subscribe page). Submit your transaction ID and we activate the plan after verification.
 
@@ -62,7 +64,7 @@ export const DEFAULT_SITE: SiteSettings = {
 1. **Service.** CivilMate provides engineering calculators, drawing generators, a building-code reference library and an AI assistant for civil, structural and construction professionals. Outputs are preliminary aids: every design must be checked and approved by a licensed engineer against the applicable local code before use in construction. We accept no liability for construction decisions.
 2. **Accounts.** You must provide a valid email address, keep your password confidential and be at least 18 years old. Staff of a Team plan are added by the team owner.
 3. **Plans and payment.** Paid plans are prepaid for the stated period (usually 30 days) and activate after payment confirmation. Prices are shown in Bangladeshi Taka (BDT) including applicable taxes unless stated otherwise; international card payments may be charged in USD. Plans do not renew automatically unless you enable a recurring card subscription.
-4. **Fair use.** Daily AI request limits apply per plan. Automated bulk use, resale of access or attempts to extract provider API keys are prohibited.
+4. **Fair use.** Monthly and daily AI credit allowances apply per plan. Automated bulk use, resale of access or attempts to extract provider API keys are prohibited.
 5. **Data.** Conversations are stored on your device, not on our servers (see the Privacy Policy). Account, payment and usage records are kept for billing and legal purposes.
 6. **Changes and termination.** We may update features and prices with notice on the website. Either party may end the service; prepaid periods remain valid until expiry. Accounts breaching these terms may be suspended.
 7. **Governing law.** These terms are governed by the laws of Bangladesh.`,

@@ -147,6 +147,18 @@ describe("quantities", () => {
   it("Bangladesh standard bricks ≈ 11.5 per cft (default)", () => { close(brickMasonry(1).bricksPerCft, 11.52, 0.01); });
 });
 
+describe("tool routing", () => {
+  const names = (q: string) => selectToolsForText(q).map((t) => t.name);
+  it("routes common Bangladeshi questions to the right tools with a small tool set", () => {
+    expect(names("What is the total weight of 20 pieces of 12 mm rod, each 40 ft long?")).toContain("rebar_schedule");
+    expect(names("How many bags of cement for 100 cft of 1:2:4 with stone chips?")).toContain("concrete_materials");
+    expect(names("5 katha plot e 2 tola bari")).toContain("plan_building");
+    expect(names("১০০ সিএফটি ঢালাইয়ে কত বস্তা সিমেন্ট লাগবে?")).toContain("concrete_materials");
+    expect(names("৫ কাঠা জমিতে বাড়ির নকশা")).toContain("plan_building");
+    expect(names("How many bags of cement for 100 cft of 1:2:4?").length).toBeLessThan(TOOLS.length / 2);
+  });
+});
+
 describe("earthwork", () => {
   it("average end area & prismoidal", () => {
     close(averageEndArea([10, 20, 30], [10, 10]).volume, 400);

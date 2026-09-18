@@ -24,14 +24,19 @@ export function numbersIn(text: string): number[] {
   return out;
 }
 
-/** True when `x` (as written, with its precision) is a rounding of some source value. */
+// Unit scalings a model may legitimately apply to a tool value: mm ↔ m (and mm² ↔ m²), kN·mm ↔ kN·m, and so on.
+const SCALES = [1, 1000, 0.001, 1e6, 1e-6];
+
+/** True when `x` (as written, with its precision) is a rounding of some source value, possibly rescaled by a power of 1000. */
 function matches(token: string, x: number, sources: number[]): boolean {
   const d = decimals(token);
   const halfStep = 0.5 * 10 ** -d + 1e-9;
-  return sources.some((v) => {
-    const a = Math.abs(v);
+  return sources.some((v0) => SCALES.some((k) => {
+    const a = Math.abs(v0) * k;
+    // Only realistic rescalings: the rescaled value must not be tiny (else nearly anything would match), e.g. 5607 mm → 5.61 m.
+    if (k !== 1 && (x < 0.1 || a < 0.1 || Math.abs(v0) < 0.1)) return false;
     return Math.abs(a - x) <= halfStep || (x >= 10 && Math.abs(a - x) <= 0.006 * a) || Math.abs(Math.ceil(a) - x) < 1e-9;
-  });
+  }));
 }
 
 /**

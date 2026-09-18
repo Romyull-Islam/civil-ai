@@ -116,7 +116,7 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
   // which cuts the first-turn prompt from ~8K to ~2K tokens (the dominant cost on CPU-only PCs).
   const localOnly = cands.length > 0 && cands.every((c) => c.id === "local" || c.id === "ollama");
   const convoText = messages.filter((m) => m.role === "user").map((m) => m.parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join(" ")).join(" ");
-  const tools = opts.toolNames ? TOOLS.filter((t) => opts.toolNames!.includes(t.name)) : localOnly ? selectToolsForText(convoText) : TOOLS;
+  const tools = opts.toolNames ? TOOLS.filter((t) => opts.toolNames!.includes(t.name)) : selectToolsForText(convoText);
   const system = localOnly ? buildCompactSystemPrompt(opts.preferences) : buildSystemPrompt(opts.preferences);
   if (!cands.length) {
     emit({ type: "error", message: opts.provider === "auto" || opts.provider === "local-first" ? "No AI provider configured. Add at least one API key in Settings (Gemini and Groq have free tiers), or run Ollama locally." : `Provider "${opts.provider}" has no API key configured. Add it in Settings.` });
@@ -135,23 +135,26 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
   // tool results) plus tool results produced in this run. Our own nudge messages are deliberately excluded.
   const groundSources: string[] = opts.messages.flatMap((m) => m.parts.map((p) => (p.type === "text" ? p.text : p.type === "tool_result" ? p.content : "")));
   let toolsUsed = false;
+  // Constants stated in the offered tools' descriptions (e.g. "katha = 720 sq ft") are vetted, so they count as sources.
+  groundSources.push(...tools.map((t) => t.description));
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     if (opts.signal?.aborted) return;
     let turn: Awaited<ReturnType<Provider["streamTurn"]>> | null = null;
     let streamedText = "";
-    // Provider selection with fallback (only before any text has streamed for this turn).
-    const tryList: Cand[] = active ? [active] : cands;
+    // Provider selection with fallback: the conversation is provider-neutral, so if the current model hits a limit
+    // mid-answer (quota, request too large), the next model in the chain can carry on. Never after text has streamed.
+    const tryList: Cand[] = active ? cands.slice(cands.indexOf(active)) : cands;
     const failures: string[] = [];
     for (const c of tryList) {
       const p = providerFor(c.id);
       try {
-        if (!active) emit({ type: "provider", provider: c.id, model: c.model });
+        if (c !== active) emit({ type: "provider", provider: c.id, model: c.model });
         turn = await p.streamTurn({ model: c.model, apiKey: c.apiKey, baseUrl: c.baseUrl, system, messages, tools, signal: opts.signal, onText: (d) => { streamedText += d; emit({ type: "text", delta: d }); } });
         active = c; provider = p;
         break;
       } catch (e) {
-        if (e instanceof ProviderUnavailableError && !streamedText && !active) {
+        if (e instanceof ProviderUnavailableError && !streamedText) {
           failures.push(`${c.id}: ${e.message}`);
           emit({ type: "notice", message: `${PROVIDER_MAP.get(c.id)?.label ?? c.id} unavailable (${e.reason}); trying next provider…` });
           continue;
@@ -164,7 +167,10 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
       emit({ type: "error", message: `All configured providers failed:\n${failures.join("\n")}` });
       return;
     }
-    if (turn.usage) totalUsage = { input: totalUsage.input + turn.usage.input, output: totalUsage.output + turn.usage.output };
+    if (turn.usage) {
+      totalUsage = { input: totalUsage.input + turn.usage.input, output: totalUsage.output + turn.usage.output };
+      emit({ type: "usage", provider: active.id, model: active.model, input: turn.usage.input, output: turn.usage.output });
+    }
 
     const cleaned = stripLeakedReasoning(turn.text);
     if (cleaned !== turn.text) { turn.text = cleaned; emit({ type: "text_replace", text: cleaned }); }

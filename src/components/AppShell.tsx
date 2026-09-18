@@ -112,7 +112,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {collapsed && <button className="w-full flex justify-center py-2 text-muted hover:text-fg" onClick={toggleCollapsed} title="Expand menu"><ChevronsRight size={16} /></button>}
           {menu && (
             <div className="absolute bottom-full left-2 right-2 mb-1 card p-1 shadow-xl z-50 min-w-56">
-              {user && <div className="px-3 py-2 text-xs text-muted border-b border-border mb-1 truncate">{user.email}{planName ? ` · ${planName} plan` : ""}{session?.usage?.limit != null ? ` · ${session.usage.remaining} requests left today` : ""}</div>}
+              {user && <div className="px-3 py-2 text-xs text-muted border-b border-border mb-1 truncate">{user.email}{planName ? ` · ${planName} plan` : ""}{session?.usage?.remaining != null ? ` · ${session.usage.remaining} AI credits left` : ""}</div>}
               {menuItems.filter((m) => m.show).map(({ href, label, icon: Icon }) => <Link key={href} href={href} onClick={() => { setMenu(false); setOpen(false); }} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-fg hover:bg-elev2"><Icon size={16} className="text-muted" /> {label}</Link>)}
               {saas && user && <button className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-err hover:bg-elev2" onClick={logoutClient}><LogOut size={16} /> Sign out</button>}
               {saas && !user && <Link href="/login" onClick={() => setMenu(false)} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-fg hover:bg-elev2"><User size={16} className="text-muted" /> Sign in</Link>}

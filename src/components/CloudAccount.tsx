@@ -24,7 +24,7 @@ export function CloudAccount() {
       {c?.linked ? (
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span>{c.backendUrl}</span>{c.offline && <span className="badge text-err border-err/40">offline</span>}
-          {c.usage?.limit != null && <span className="text-muted">{c.usage.remaining} of {c.usage.limit} cloud requests left today</span>}
+          {c.usage?.remaining != null && <span className="text-muted">{c.usage.remaining} cloud AI credits left</span>}
           <button className="btn btn-sm" onClick={unlink}><LogOut size={13} /> Unlink</button>
         </div>
       ) : (

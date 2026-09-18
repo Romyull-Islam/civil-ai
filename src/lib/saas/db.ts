@@ -14,7 +14,7 @@ export interface Share { id: string; userId: string; title: string; size: number
 export interface Save { id: string; userId: string; kind: "chat" | "drawing"; title: string; size: number; data: string /* base64 gzip json */; createdAt: number; updatedAt: number }
 export interface Ticket { id: string; userId: string | null; email: string; subject: string; message: string; status: "open" | "answered" | "closed"; reply: string; createdAt: number; updatedAt: number }
 export interface Session { token: string; userId: string; expires: number }
-export interface UsageRow { day: string; requests: number; inputTokens: number; outputTokens: number }
+export interface UsageRow { day: string; requests: number; inputTokens: number; outputTokens: number; credits: number }
 
 export interface DB {
   init(): Promise<void>;
@@ -31,8 +31,10 @@ export interface DB {
   deleteSessionsForUser(userId: string): Promise<void>;
   getSetting(key: string): Promise<string | null>;
   setSetting(key: string, value: string): Promise<void>;
-  addUsage(userId: string, day: string, requests: number, inputTokens: number, outputTokens: number): Promise<void>;
+  addUsage(userId: string, day: string, requests: number, inputTokens: number, outputTokens: number, credits?: number): Promise<void>;
   getUsage(userId: string, day: string): Promise<UsageRow>;
+  /** totals for one user from `fromDay` (inclusive) to today */
+  sumUsage(userId: string, fromDay: string): Promise<UsageRow>;
   usageByDay(days: number): Promise<UsageRow[]>;
   usageByUser(days: number, limit?: number): Promise<(UsageRow & { userId: string; email: string })[]>;
   setVerification(id: string, code: string | null, expires: number | null, verified?: number): Promise<void>;
@@ -86,6 +88,8 @@ const MIGRATIONS = (big: string) => [
   `ALTER TABLE users ADD COLUMN verify_code TEXT`,
   `ALTER TABLE users ADD COLUMN verify_expires ${big}`,
   `ALTER TABLE payments ADD COLUMN seats INTEGER NOT NULL DEFAULT 1`,
+  // AI credits used, stored in thousandths so both SQLite and Postgres can keep an integer column
+  `ALTER TABLE usage ADD COLUMN credits_milli ${big} NOT NULL DEFAULT 0`,
 ];
 
 type Row = Record<string, unknown>;
@@ -95,7 +99,7 @@ const toTeam = (r: Row): Team => ({ id: String(r.id), name: String(r.name), owne
 const toShare = (r: Row): Share => ({ id: String(r.id), userId: String(r.user_id), title: String(r.title), size: Number(r.size), data: String(r.data ?? ""), createdAt: Number(r.created_at), expiresAt: Number(r.expires_at), views: Number(r.views ?? 0) });
 const toSave = (r: Row): Save => ({ id: String(r.id), userId: String(r.user_id), kind: r.kind === "drawing" ? "drawing" : "chat", title: String(r.title), size: Number(r.size), data: String(r.data ?? ""), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) });
 const toTicket = (r: Row): Ticket => ({ id: String(r.id), userId: r.user_id == null ? null : String(r.user_id), email: String(r.email), subject: String(r.subject), message: String(r.message), status: r.status as Ticket["status"], reply: String(r.reply ?? ""), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) });
-const toUsage = (r: Row | undefined): UsageRow => ({ day: String(r?.day ?? ""), requests: Number(r?.requests ?? 0), inputTokens: Number(r?.input_tokens ?? 0), outputTokens: Number(r?.output_tokens ?? 0) });
+const toUsage = (r: Row | undefined): UsageRow => ({ day: String(r?.day ?? ""), requests: Number(r?.requests ?? 0), inputTokens: Number(r?.input_tokens ?? 0), outputTokens: Number(r?.output_tokens ?? 0), credits: Number(r?.credits_milli ?? 0) / 1000 });
 const dayCutoff = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
 
 /** Generic SQL-backed implementation; `run`/`all` are provided per dialect. */
@@ -122,9 +126,10 @@ function makeDB(run: (sql: string, params?: unknown[]) => Promise<void>, all: (s
     async deleteSessionsForUser(userId) { await run("DELETE FROM sessions WHERE user_id = ?", [userId]); },
     async getSetting(key) { const r = await one("SELECT value FROM settings WHERE key = ?", [key]); return r ? String(r.value) : null; },
     async setSetting(key, value) { await run("DELETE FROM settings WHERE key = ?", [key]); await run("INSERT INTO settings (key, value) VALUES (?,?)", [key, value]); },
-    async addUsage(userId, day, requests, i, o) { await run(upsertUsage, [userId, day, requests, i, o]); },
+    async addUsage(userId, day, requests, i, o, credits = 0) { await run(upsertUsage, [userId, day, requests, i, o, Math.round(credits * 1000)]); },
     async getUsage(userId, day) { return toUsage(await one("SELECT * FROM usage WHERE user_id = ? AND day = ?", [userId, day])); },
-    async usageByDay(days) { return (await all("SELECT day, SUM(requests) AS requests, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens FROM usage WHERE day >= ? GROUP BY day ORDER BY day DESC", [dayCutoff(days)])).map(toUsage); },
+    async sumUsage(userId, fromDay) { return toUsage(await one("SELECT SUM(requests) AS requests, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(credits_milli) AS credits_milli FROM usage WHERE user_id = ? AND day >= ?", [userId, fromDay])); },
+    async usageByDay(days) { return (await all("SELECT day, SUM(requests) AS requests, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(credits_milli) AS credits_milli FROM usage WHERE day >= ? GROUP BY day ORDER BY day DESC", [dayCutoff(days)])).map(toUsage); },
     async setVerification(id, code, expires, verified) { await run("UPDATE users SET verify_code = ?, verify_expires = ?" + (verified === undefined ? "" : ", email_verified = ?") + " WHERE id = ?", verified === undefined ? [code, expires, id] : [code, expires, verified, id]); },
     async createPayment(p) { await run("INSERT INTO payments (id, user_id, email, plan, method, amount, currency, txn_id, sender, status, note, created_at, reviewed_at, seats) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [p.id, p.userId, p.email, p.plan, p.method, p.amount, p.currency, p.txnId, p.sender, p.status, p.note, p.createdAt, p.reviewedAt, p.seats ?? 1]); },
     async listPayments({ userId, status, limit = 200 }) { const w: string[] = []; const v: unknown[] = []; if (userId) { w.push("user_id = ?"); v.push(userId); } if (status) { w.push("status = ?"); v.push(status); } return (await all(`SELECT * FROM payments${w.length ? " WHERE " + w.join(" AND ") : ""} ORDER BY created_at DESC LIMIT ?`, [...v, limit])).map(toPayment); },
@@ -155,7 +160,7 @@ function makeDB(run: (sql: string, params?: unknown[]) => Promise<void>, all: (s
     async bumpShareViews(id) { await run("UPDATE shares SET views = views + 1 WHERE id = ?", [id]); },
     async purgeExpiredShares() { await run("DELETE FROM shares WHERE expires_at < ?", [Date.now()]); },
     async savesTotal() { const r = await one("SELECT COALESCE(SUM(size),0) AS bytes, COUNT(*) AS n, COUNT(DISTINCT user_id) AS u FROM saves"); return { bytes: Number(r?.bytes ?? 0), count: Number(r?.n ?? 0), users: Number(r?.u ?? 0) }; },
-    async usageByUser(days, limit = 50) { return (await all("SELECT u.user_id, us.email, SUM(u.requests) AS requests, SUM(u.input_tokens) AS input_tokens, SUM(u.output_tokens) AS output_tokens FROM usage u JOIN users us ON us.id = u.user_id WHERE u.day >= ? GROUP BY u.user_id, us.email ORDER BY requests DESC LIMIT ?", [dayCutoff(days), limit])).map((r) => ({ ...toUsage(r), userId: String(r.user_id), email: String(r.email) })); },
+    async usageByUser(days, limit = 50) { return (await all("SELECT u.user_id, us.email, SUM(u.requests) AS requests, SUM(u.input_tokens) AS input_tokens, SUM(u.output_tokens) AS output_tokens, SUM(u.credits_milli) AS credits_milli FROM usage u JOIN users us ON us.id = u.user_id WHERE u.day >= ? GROUP BY u.user_id, us.email ORDER BY requests DESC LIMIT ?", [dayCutoff(days), limit])).map((r) => ({ ...toUsage(r), userId: String(r.user_id), email: String(r.email) })); },
   };
 }
 
@@ -168,7 +173,7 @@ async function sqliteDB(): Promise<DB> {
   db.exec("PRAGMA journal_mode = WAL");
   const norm = (p?: unknown[]) => (p ?? []).map((v) => (v === undefined ? null : v)) as never[];
   return makeDB(async (sql, p) => { db.prepare(sql).run(...norm(p)); }, async (sql, p) => db.prepare(sql).all(...norm(p)) as Row[], "INTEGER",
-    "INSERT INTO usage (user_id, day, requests, input_tokens, output_tokens) VALUES (?,?,?,?,?) ON CONFLICT(user_id, day) DO UPDATE SET requests = requests + excluded.requests, input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens");
+    "INSERT INTO usage (user_id, day, requests, input_tokens, output_tokens, credits_milli) VALUES (?,?,?,?,?,?) ON CONFLICT(user_id, day) DO UPDATE SET requests = requests + excluded.requests, input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens, credits_milli = credits_milli + excluded.credits_milli");
 }
 
 async function postgresDB(url: string): Promise<DB> {
@@ -184,7 +189,7 @@ async function postgresDB(url: string): Promise<DB> {
   const pool = new Pool({ connectionString: u.toString(), ssl: wantsSsl ? (ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false }) : undefined, max: 5, idleTimeoutMillis: 30000 });
   const pgify = (sql: string) => { let i = 0; return sql.replace(/\?/g, () => `$${++i}`); };
   return makeDB(async (sql, p) => { await pool.query(pgify(sql), p ?? []); }, async (sql, p) => (await pool.query(pgify(sql), p ?? [])).rows as Row[], "BIGINT",
-    "INSERT INTO usage (user_id, day, requests, input_tokens, output_tokens) VALUES (?,?,?,?,?) ON CONFLICT (user_id, day) DO UPDATE SET requests = usage.requests + EXCLUDED.requests, input_tokens = usage.input_tokens + EXCLUDED.input_tokens, output_tokens = usage.output_tokens + EXCLUDED.output_tokens");
+    "INSERT INTO usage (user_id, day, requests, input_tokens, output_tokens, credits_milli) VALUES (?,?,?,?,?,?) ON CONFLICT (user_id, day) DO UPDATE SET requests = usage.requests + EXCLUDED.requests, input_tokens = usage.input_tokens + EXCLUDED.input_tokens, output_tokens = usage.output_tokens + EXCLUDED.output_tokens, credits_milli = usage.credits_milli + EXCLUDED.credits_milli");
 }
 
 let dbPromise: Promise<DB> | null = null;

@@ -1,6 +1,7 @@
 import { getDB, isStaff, type User, type Role, type Team } from "./db";
 import { hashPassword, verifyPassword, newId, newToken, encrypt, decrypt } from "./crypto";
-import { DEFAULT_PLANS, planModels, type Plan } from "./plans";
+import { DEFAULT_PLANS, planModels, withCreditDefaults, type Plan } from "./plans";
+import { creditsFor } from "./credits";
 import { PROVIDERS, type KeyBag } from "@/lib/ai/registry";
 import { sendEmail, emailConfigured } from "./email";
 import { getSite } from "./site";
@@ -154,7 +155,7 @@ export async function logout(req: Request) {
 export async function getPlans(): Promise<Plan[]> {
   const raw = await (await getDB()).getSetting("plans");
   if (!raw) return DEFAULT_PLANS;
-  try { const p = JSON.parse(raw) as Plan[]; return Array.isArray(p) && p.length ? p : DEFAULT_PLANS; } catch { return DEFAULT_PLANS; }
+  try { const p = JSON.parse(raw) as Plan[]; return Array.isArray(p) && p.length ? p.map(withCreditDefaults) : DEFAULT_PLANS; } catch { return DEFAULT_PLANS; }
 }
 export async function setPlans(plans: Plan[]) { await (await getDB()).setSetting("plans", JSON.stringify(plans)); }
 
@@ -229,14 +230,52 @@ export async function keyStatus(): Promise<Record<string, { set: boolean; fromEn
 
 // ---------- quotas & usage ----------
 export const today = () => new Date().toISOString().slice(0, 10);
-export async function quota(user: User): Promise<{ plan: Plan; used: number; limit: number; remaining: number }> {
-  const plan = await planFor(user);
-  const used = (await (await getDB()).getUsage(user.id, today())).requests;
-  const limit = isStaff(user.role) ? Number.MAX_SAFE_INTEGER : plan.dailyRequests;
-  return { plan, used, limit, remaining: Math.max(0, limit - used) };
+export interface Quota {
+  plan: Plan;
+  /** credits used today (UTC) and the daily budget */
+  used: number;
+  limit: number;
+  /** credits used since the billing period began and the period budget */
+  periodUsed: number;
+  periodLimit: number;
+  periodStart: string;
+  /** what can still be spent now: the smaller of the daily and period allowances */
+  remaining: number;
 }
-export async function recordUsage(userId: string, inputTokens: number, outputTokens: number) {
-  await (await getDB()).addUsage(userId, today(), 1, inputTokens, outputTokens);
+
+/**
+ * First day of the current billing period: paid plans run from (expiry − periodDays), so a renewal starts a fresh budget;
+ * free plans and plans without an expiry use the calendar month (UTC).
+ */
+export function periodStartDay(plan: Plan, expires: number | null, now = Date.now()): string {
+  const monthStart = new Date(now).toISOString().slice(0, 8) + "01";
+  if (!expires || plan.priceMonthly === 0) return monthStart;
+  const start = new Date(Math.min(expires - (plan.periodDays ?? 30) * 86400000, now)).toISOString().slice(0, 10);
+  return start;
+}
+
+export async function quota(user: User): Promise<Quota> {
+  const plan = await planFor(user);
+  const db = await getDB();
+  const team = await db.getTeamForUser(user.id);
+  const expires = team && team.plan === plan.id ? team.expires : user.planExpires;
+  const periodStart = periodStartDay(plan, expires);
+  const [day, period] = await Promise.all([db.getUsage(user.id, today()), db.sumUsage(user.id, periodStart)]);
+  if (isStaff(user.role)) return { plan, used: day.credits, limit: Infinity, periodUsed: period.credits, periodLimit: Infinity, periodStart, remaining: Infinity };
+  const remaining = Math.max(0, Math.min(plan.dailyCredits - day.credits, plan.monthlyCredits - period.credits));
+  return { plan, used: day.credits, limit: plan.dailyCredits, periodUsed: period.credits, periodLimit: plan.monthlyCredits, periodStart, remaining };
+}
+
+/** Usage summary for the UI (credits rounded to 0.1; staff are unlimited → null limits). */
+export function publicUsage(q: Quota) {
+  const r = (n: number) => Math.round(n * 10) / 10;
+  const unlimited = !Number.isFinite(q.limit);
+  return { used: r(q.used), limit: unlimited ? null : q.limit, remaining: unlimited ? null : r(q.remaining), periodUsed: r(q.periodUsed), periodLimit: unlimited ? null : q.periodLimit, periodStart: q.periodStart };
+}
+
+/** Charge one model call: credits by that model's price and real token use (see credits.ts). `newRequest` counts a user question. */
+export async function recordUsage(userId: string, provider: string, model: string, inputTokens: number, outputTokens: number, newRequest = false) {
+  await (await getDB()).addUsage(userId, today(), newRequest ? 1 : 0, inputTokens, outputTokens, creditsFor(provider, model, inputTokens, outputTokens));
 }
 
 /** Pick provider/model for a SaaS request: honour the user's choice if the plan allows it, else the plan default. */

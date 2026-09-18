@@ -35,6 +35,9 @@ Sand volume 154 cft × (2 / 6) = 51.33 cft. Aggregate volume 154 cft × (3 / 6) 
     expect(ungroundedNumbers(answer, [])).toEqual([]);
   });
 
+  it("accepts mm → m conversions of tool values", () => {
+    expect(ungroundedNumbers("Living room 5.61 m × 3.56 m", ['{"width":5607,"length":3555}'])).toEqual([]);
+  });
   it("accepts rounding to the precision written", () => {
     expect(ungroundedNumbers("Moment 112.5 kN·m, about 113 kN·m, shear 75.0 kN", ["{\"M\":112.5,\"V\":75.0001}"])).toEqual([]);
     expect(ungroundedNumbers("Moment 120 kN·m", ["{\"M\":112.5}"])).toEqual(["120"]);

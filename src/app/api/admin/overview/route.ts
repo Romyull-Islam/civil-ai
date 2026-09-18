@@ -37,7 +37,7 @@ export const GET = guardArea("users", async (_req, actor) => {
   const manualPay = [site.payment.bkash, site.payment.nagad, site.payment.rocket, site.payment.bank, site.payment.qrImage].some(Boolean);
   const label = (p: string, m: string) => PROVIDERS.find((x) => x.id === p)?.models.find((x) => x.id === m)?.label;
   const planSummary = plans.map((p) => ({
-    id: p.id, name: p.name, price: p.priceMonthly, currency: p.currency, dailyRequests: p.dailyRequests, perSeat: !!p.perSeat, localAI: p.localAI, cloudMB: p.cloudStorageMB ?? 0,
+    id: p.id, name: p.name, price: p.priceMonthly, currency: p.currency, monthlyCredits: p.monthlyCredits, dailyCredits: p.dailyCredits, perSeat: !!p.perSeat, localAI: p.localAI, cloudMB: p.cloudStorageMB ?? 0,
     models: planModels(p).map((m) => ({ ...m, ...friendlyModel(m.provider, m.model, label(m.provider, m.model)), hasKey: hasKey(m.provider) })),
   }));
   const keysReady = Object.entries(keys).filter(([, v]) => v.set || v.fromEnv).map(([k]) => k);

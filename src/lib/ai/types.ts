@@ -46,5 +46,7 @@ export type AgentEvent =
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; id: string; name: string; output: ToolOutput & { error?: string } }
   | { type: "notice"; message: string }
+  /** tokens used by one model call (emitted after every call, so partial answers are billed too) */
+  | { type: "usage"; provider: string; model: string; input: number; output: number }
   | { type: "done"; usage?: { input: number; output: number }; provider: string; model: string }
   | { type: "error"; message: string };

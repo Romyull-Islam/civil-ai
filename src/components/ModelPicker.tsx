@@ -6,6 +6,7 @@ import { useSettings, saveSettings } from "@/lib/client/settings";
 import { friendlyModel, TIER_LABEL, type Tier } from "@/lib/ai/friendly";
 import { PROVIDERS } from "@/lib/ai/registry";
 import { useSession } from "@/lib/client/session";
+import { estimateCredits } from "@/lib/saas/credits";
 
 /** Compact provider/model switcher shown under the chat box. Same settings as the Settings page. */
 export function ModelPicker() {
@@ -22,7 +23,7 @@ export function ModelPicker() {
           <option value="local">Local model (offline, unlimited)</option>
           {cloud.allowedModels.map((m) => <option key={m.provider + m.model} value={`${m.provider}|${m.model}`}>☁ {PROVIDERS.find((p) => p.id === m.provider)?.models.find((x) => x.id === m.model)?.label ?? m.model} · {cloud.plan?.name ?? "cloud"}</option>)}
         </select>
-        {cloud.usage?.limit != null && <span>· cloud: {cloud.usage.remaining} of {cloud.usage.limit} left today</span>}
+        {cloud.usage?.remaining != null && <span>· cloud: {cloud.usage.remaining} credits left</span>}
       </div>
     );
   }
@@ -44,6 +45,12 @@ export function ModelPicker() {
       )}
     </div>
   );
+}
+
+/** "2 credits" per typical engineering question, from the model's price (see lib/saas/credits.ts). */
+function creditLabel(provider: string, model: string): string {
+  const c = estimateCredits(provider, model);
+  return c < 1.5 ? "1 credit" : `${Math.round(c)} credits`;
 }
 
 const TIER_STYLE: Record<Tier, string> = { fast: "text-ok border-ok/40", smart: "text-accent2 border-accent2/40", best: "text-accent border-accent/50" };
@@ -71,18 +78,18 @@ function PlanModelChooser() {
       <button className="flex items-center gap-1.5 rounded-lg px-2 py-1 hover:bg-elev2 text-fg" onClick={() => setOpen((v) => !v)} title="Choose model">
         <Sparkles size={13} className="text-accent" /> {curName} <ChevronDown size={13} className={`transition ${open ? "rotate-180" : ""}`} />
       </button>
-      {session?.usage?.limit != null && <span className="hidden sm:inline">{session.usage.remaining} of {session.usage.limit} left today</span>}
+      {session?.usage?.remaining != null && <span className="hidden sm:inline" title={`Today ${session.usage.used} of ${session.usage.limit} credits · this period ${session.usage.periodUsed} of ${session.usage.periodLimit}`}>{session.usage.remaining} credits left</span>}
       {open && (
         <div className="absolute bottom-full left-0 mb-2 w-80 max-h-[60vh] overflow-y-auto card p-1 shadow-xl z-50 text-sm">
           <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-elev2 flex gap-2" onClick={() => pick("auto")}>
             <Sparkles size={16} className="text-accent mt-0.5 shrink-0" />
-            <div className="flex-1"><div className="font-medium flex items-center gap-2">Auto <span className="badge">recommended</span></div><div className="text-xs text-muted">Uses the best model on your plan and switches automatically if one is busy</div></div>
+            <div className="flex-1"><div className="font-medium flex items-center gap-2">Auto <span className="badge">recommended</span></div><div className="text-xs text-muted">Uses your plan&apos;s default model and switches automatically if one is busy. Credits are charged by the model that answers.</div></div>
             {!cur && <Check size={16} className="text-ok shrink-0" />}
           </button>
           <div className="label px-3 pt-2 pb-1">Your plan{session?.plan?.name ? ` (${session.plan.name})` : ""}</div>
           {allowed.map((m) => { const f = friendlyModel(m.provider, m.model, label(m.provider, m.model)); const active = cur?.provider === m.provider && cur?.model === m.model; return (
             <button key={m.provider + m.model} className="w-full text-left rounded-lg px-3 py-2 hover:bg-elev2 flex gap-2" onClick={() => pick(m.provider, m.model)}>
-              <div className="flex-1 min-w-0"><div className="font-medium flex items-center gap-2">{f.name}<span className={`badge ${TIER_STYLE[f.tier]}`}>{TIER_LABEL[f.tier]}</span>{f.vision && <Eye size={13} className="text-muted" aria-label="reads images" />}</div>{f.blurb && <div className="text-xs text-muted">{f.blurb}</div>}</div>
+              <div className="flex-1 min-w-0"><div className="font-medium flex items-center gap-2">{f.name}<span className={`badge ${TIER_STYLE[f.tier]}`}>{TIER_LABEL[f.tier]}</span>{f.vision && <Eye size={13} className="text-muted" aria-label="reads images" />}<span className="ml-auto text-[11px] text-muted font-normal">≈{creditLabel(m.provider, m.model)}</span></div>{f.blurb && <div className="text-xs text-muted">{f.blurb}</div>}</div>
               {active && <Check size={16} className="text-ok shrink-0" />}
             </button>); })}
           {locked.length > 0 && (

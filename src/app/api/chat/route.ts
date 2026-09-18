@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   let provider = body.provider ?? "auto";
   let model = body.model;
   let keys: KeyBag = body.keys ?? {};
-  let onDone: ((usage?: { input: number; output: number }) => void) | null = null;
+  let onUsage: ((e: Extract<AgentEvent, { type: "usage" }>) => void) | null = null;
   let chainOverride: string[] | undefined;
 
   // Downloadable/self-hosted app linked to a hosted CivilMate account: cloud models are answered by the backend (its keys, its quotas);
@@ -40,21 +40,27 @@ export async function POST(req: Request) {
     if (!user) return Response.json({ error: "Please sign in to use the assistant." }, { status: 401 });
     if (!user.emailVerified) return Response.json({ error: "Please verify your email address first (check your inbox for the code)." }, { status: 403 });
     const q = await quota(user);
-    if (q.remaining <= 0) return Response.json({ error: `Daily limit of ${q.limit} AI requests reached on the ${q.plan.name} plan. Upgrade your plan or try again tomorrow (UTC).` }, { status: 429 });
+    if (q.remaining <= 0) {
+      const monthly = q.periodLimit - q.periodUsed <= q.limit - q.used;
+      return Response.json({ error: monthly
+        ? `You have used this period's ${q.periodLimit} AI credits on the ${q.plan.name} plan. Upgrade or renew to continue; calculators, drawings and the code library stay available.`
+        : `You have used today's ${q.limit} AI credits on the ${q.plan.name} plan. They refresh at 06:00 Bangladesh time (00:00 UTC); calculators, drawings and the code library stay available.` }, { status: 429 });
+    }
     const choice = chooseModel(q.plan, body.provider, body.model);
     provider = choice.provider; model = choice.model;
     // Server-held keys only; the client's keys are ignored. Per-provider preferred models come from the plan.
     keys = await getServerKeys();
     for (const c of choice.chain) keys[c.provider] = { ...(keys[c.provider] ?? {}), model: keys[c.provider]?.model ?? c.model };
     chainOverride = [...new Set(choice.chain.map((c) => c.provider))];
-    onDone = (usage) => { recordUsage(user.id, usage?.input ?? 0, usage?.output ?? 0).catch(() => {}); };
+    let counted = false;
+    onUsage = (e) => { recordUsage(user.id, e.provider, e.model, e.input, e.output, !counted).catch(() => {}); counted = true; };
   }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const emit = (e: AgentEvent) => {
-        if (e.type === "done" && onDone) onDone(e.usage);
+        if (e.type === "usage" && onUsage) onUsage(e);
         try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(e)}\n\n`)); } catch { /* closed */ }
       };
       runAgent({ messages: body.messages, provider, model, keys, preferences: body.preferences, signal: req.signal, emit, chain: chainOverride })

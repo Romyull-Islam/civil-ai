@@ -356,19 +356,20 @@ export const TOOL_MAP = new Map(TOOLS.map((t) => [t.name, t]));
 /** Always-available small tools. */
 const CORE_TOOLS = ["calculate", "convert_units", "search_code_clauses"];
 const TOOL_GROUPS: { keys: RegExp; tools: string[] }[] = [
-  { keys: /\b(beam|girder|lintel|joist|purlin|udl|point load|bending|shear|deflect|moment|cantilever|span)\b/i, tools: ["analyze_beam", "design_rc_beam", "design_steel_beam", "draw_beam_section", "draw_beam_elevation"] },
-  { keys: /\b(column|pillar|post|axial|strut)\b/i, tools: ["design_rc_column", "draw_column_section"] },
-  { keys: /\b(slab|floor plate|roof slab|deck)\b/i, tools: ["design_one_way_slab"] },
-  { keys: /\b(footing|foundation|soil|bearing|sbc|terzaghi|retaining|earth pressure|pile)\b/i, tools: ["bearing_capacity", "earth_pressure", "design_isolated_footing", "draw_footing"] },
+  { keys: /\b(beam|girder|lintel|joist|purlin|udl|point load|bending|shear|deflect|moment|cantilever|span)\b|বিম|বীম/i, tools: ["analyze_beam", "design_rc_beam", "design_steel_beam", "draw_beam_section", "draw_beam_elevation"] },
+  { keys: /\b(column|pillar|post|axial|strut)\b|কলাম/i, tools: ["design_rc_column", "draw_column_section"] },
+  { keys: /\b(slab|floor plate|roof slab|deck)\b|স্ল্যাব|ছাদ/i, tools: ["design_one_way_slab"] },
+  { keys: /\b(footing|foundation|soil|bearing|sbc|terzaghi|retaining|earth pressure|pile)\b|ফাউন্ডেশন|ফুটিং|পাইল|মাটি/i, tools: ["bearing_capacity", "earth_pressure", "design_isolated_footing", "draw_footing"] },
   { keys: /\b(steel|ismb|w-?shape|section|rolled)\b/i, tools: ["design_steel_beam", "analyze_beam"] },
-  { keys: /\b(quantit|estimat|boq|bill|cement|sand|aggregate|bag|brick|block|masonry|plaster|paint|tile|excavat|earthwork|cut|fill|volume|rebar|steel weight|bar bending|bbs|material)/i, tools: ["concrete_materials", "rebar_schedule", "masonry_and_finishes", "earthwork_volume"] },
-  { keys: /\b(plan|room|layout|house|flat|apartment|villa|duplex|storey|story|stories|shop|mall|office|floor plan|bedroom|kitchen|architect|plot|setback|far|fsi|coverage)\b/i, tools: ["plan_building", "plan_layout", "plot_stats", "draw_floor_plan", "draw_custom"] },
+  { keys: /\b(quantit|estimat|boq|bill|cement|sand|aggregate|stone chip|khoa|bag|brick|block|masonry|plaster|paint|tile|excavat|earthwork|cut|fill|volume|rebar|rods?\b|steel weight|bar bending|bbs|material)|সিমেন্ট|বালি|খোয়া|পাথর|ইট|রড|ঢালাই|প্লাস্টার/i, tools: ["concrete_materials", "rebar_schedule", "masonry_and_finishes", "earthwork_volume"] },
+  { keys: /\b(plan|room|layout|house|flat|apartment|villa|duplex|storey|story|stories|shop|mall|office|floor plan|bedroom|kitchen|architect|plot|setback|far|fsi|coverage|katha|bigha)\b|বাড়ি|বাড়ি|ফ্ল্যাট|নকশা|প্ল্যান|কাঠা|বিঘা|তলা/i, tools: ["plan_building", "plan_layout", "plot_stats", "draw_floor_plan", "draw_custom"] },
   { keys: /\b(draw|drawing|sketch|detail|section|elevation|dxf|cad)\b/i, tools: ["draw_custom", "draw_beam_section", "draw_column_section", "draw_footing", "draw_floor_plan"] },
 ];
 
 /**
- * Pick a compact tool set for small local models (shorter prompt = much faster first turn on CPU).
- * Cloud models get every tool. Falls back to all tools when nothing matches.
+ * Pick the tool set relevant to the conversation. Every model call re-sends all tool schemas (~6.7K tokens for all
+ * of them), so routing cuts cost for cloud models and keeps requests under free-tier token limits; on CPU-only PCs
+ * it also makes local models much faster. Falls back to all tools when nothing matches.
  */
 export function selectToolsForText(text: string): ToolDef[] {
   const names = new Set(CORE_TOOLS);

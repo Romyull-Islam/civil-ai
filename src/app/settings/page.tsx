@@ -55,7 +55,7 @@ export default function SettingsPage() {
         {!saas && <LocalAI />}
         {!saas && <CloudAccount />}
 
-        {saas && <section className="card p-4 text-sm"><h2 className="font-medium">Your plan</h2><p className="text-muted mt-1">Models and daily limits come from your subscription ({session?.plan?.name}). Pick a model from the selector under the chat box. Manage your account on the <a className="text-accent2" href="/account">Account</a> page.</p></section>}
+        {saas && <section className="card p-4 text-sm"><h2 className="font-medium">Your plan</h2><p className="text-muted mt-1">Models and AI credits come from your subscription ({session?.plan?.name}): each answer uses credits according to the model and the length of the conversation, with a daily and a monthly allowance. Pick a model from the selector under the chat box. Manage your account on the <a className="text-accent2" href="/account">Account</a> page.</p></section>}
 
         {byok && <section className="grid gap-3">
           <h2 className="font-medium">API keys</h2>

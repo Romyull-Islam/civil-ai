@@ -6,7 +6,8 @@ import type { Promo } from "@/lib/saas/site";
 import { friendlyModel, TIER_LABEL } from "@/lib/ai/friendly";
 import type { SiteSettings } from "@/lib/saas/site";
 import { PROVIDERS } from "@/lib/ai/registry";
-import { DEFAULT_PLANS } from "@/lib/saas/plans";
+import { DEFAULT_PLANS, planModels } from "@/lib/saas/plans";
+import { CREDIT_USD, USD_TO_BDT, estimateCredits, modelPrice } from "@/lib/saas/credits";
 import { useSession } from "@/lib/client/session";
 import type { Plan } from "@/lib/saas/plans";
 
@@ -65,7 +66,7 @@ export default function AdminPage() {
 interface Overview {
   counts: { users: number; paidUsers: number; newThisWeek: number; pendingPayments: number; openTickets: number; requestsToday: number; requests7d: number; cloudMB: number; cloudCapMB: number };
   checklist?: { id: string; ok: boolean; title: string; detail: string; tab: string }[];
-  planSummary?: { id: string; name: string; price: number; currency: string; dailyRequests: number; perSeat: boolean; localAI: boolean; cloudMB: number; models: { provider: string; model: string; name: string; tier: string; hasKey: boolean }[] }[];
+  planSummary?: { id: string; name: string; price: number; currency: string; monthlyCredits: number; dailyCredits: number; perSeat: boolean; localAI: boolean; cloudMB: number; models: { provider: string; model: string; name: string; tier: string; hasKey: boolean }[] }[];
 }
 function OverviewTab({ go, admin }: { go: (t: Tab) => void; admin: boolean }) {
   const [o, setO] = useState<Overview | null>(null);
@@ -85,7 +86,7 @@ function OverviewTab({ go, admin }: { go: (t: Tab) => void; admin: boolean }) {
         {card("Payments to verify", c.pendingPayments, c.pendingPayments ? "Approve or reject" : "All done", "payments", c.pendingPayments > 0)}
         {card("Open support tickets", c.openTickets, c.openTickets ? "Waiting for a reply" : "All answered", "support", c.openTickets > 0)}
         {card("Paying customers", c.paidUsers, `${c.users} accounts · ${c.newThisWeek} new this week`, "users")}
-        {card("AI requests", c.requestsToday, `today · ${c.requests7d} in 7 days`, admin ? "usage" : undefined)}
+        {card("AI questions", c.requestsToday, `today · ${c.requests7d} in 7 days`, admin ? "usage" : undefined)}
       </div>
       {admin && o.checklist && (
         <div className="card p-4 grid gap-2">
@@ -106,7 +107,7 @@ function OverviewTab({ go, admin }: { go: (t: Tab) => void; admin: boolean }) {
             {o.planSummary.map((p) => (
               <div key={p.id} className="border border-border rounded-lg p-3 text-sm grid gap-1 content-start">
                 <div className="font-medium">{p.name} <span className="text-muted font-normal">{p.price ? `${p.currency === "BDT" ? "৳" : p.currency + " "}${p.price}${p.perSeat ? "/user" : ""}` : "free"}</span></div>
-                <div className="text-xs text-muted">{p.dailyRequests} requests/day · backups {p.cloudMB ? `${p.cloudMB} MB` : "none"} · offline model {p.localAI ? "yes" : "no"}</div>
+                <div className="text-xs text-muted">{p.monthlyCredits} credits/month ({p.dailyCredits}/day), worst-case AI cost ≈ ৳{Math.round(p.monthlyCredits * CREDIT_USD * USD_TO_BDT)} per user · backups {p.cloudMB ? `${p.cloudMB} MB` : "none"} · offline model {p.localAI ? "yes" : "no"}</div>
                 <ul className="grid gap-0.5 mt-1">{p.models.map((m) => <li key={m.provider + m.model} className="flex items-center gap-1.5 text-xs"><span className={m.hasKey ? "" : "text-err line-through"}>{m.name}</span><span className="text-muted">{m.tier}</span>{!m.hasKey && <span className="text-err">no key</span>}</li>)}{!p.models.length && <li className="text-xs text-err">No models selected</li>}</ul>
               </div>
             ))}
@@ -196,7 +197,7 @@ function PlansTab() {
     else { const idx = providers.findIndex((x) => x.provider === provider); const has = providers[idx].models.includes(model); providers[idx].models = has ? providers[idx].models.filter((m) => m !== model) : [...providers[idx].models, model]; if (!providers[idx].models.length) providers = providers.filter((_, k) => k !== idx); }
     upd(i, { providers });
   };
-  const addPlan = () => setPlans([...plans, { id: `plan${plans.length + 1}`, name: "New plan", priceMonthly: 0, priceUSD: 0, currency: "BDT", dailyRequests: 50, vision: false, localAI: false, periodDays: 30, graceDays: 3, cloudStorageMB: 0, maxSavedItems: 0, providers: [], features: [] }]);
+  const addPlan = () => setPlans([...plans, { id: `plan${plans.length + 1}`, name: "New plan", priceMonthly: 0, priceUSD: 0, currency: "BDT", monthlyCredits: 300, dailyCredits: 30, vision: false, localAI: false, periodDays: 30, graceDays: 3, cloudStorageMB: 0, maxSavedItems: 0, providers: [], features: [] }]);
   return (
     <div className="grid gap-3">
       <p className="text-xs text-muted">Each plan lists which models its subscribers can choose in the chat selector (the first ticked model of the first provider is the default). Providers marked <span className="text-err">no key</span> will not work until a key is added in <b>Provider API keys</b>. Prices are in the plan currency (৳ BDT); the USD price is used by Stripe. <button className="text-accent2" onClick={() => setRaw(!raw)}>{raw ? "Visual editor" : "Edit as JSON"}</button></p>
@@ -209,7 +210,8 @@ function PlansTab() {
             <div><label className="label">Name</label><input className="input mt-1" value={p.name} onChange={(e) => upd(i, { name: e.target.value })} /></div>
             <div><label className="label">Price / period ({p.currency})</label><input className="input mt-1" type="number" value={p.priceMonthly} onChange={(e) => upd(i, { priceMonthly: Number(e.target.value) })} /></div>
             <div><label className="label">Price USD (Stripe)</label><input className="input mt-1" type="number" step="0.1" value={p.priceUSD ?? 0} onChange={(e) => upd(i, { priceUSD: Number(e.target.value) })} /></div>
-            <div><label className="label">AI requests / day</label><input className="input mt-1" type="number" value={p.dailyRequests} onChange={(e) => upd(i, { dailyRequests: Number(e.target.value) })} /></div>
+            <div><label className="label">AI credits / period</label><input className="input mt-1" type="number" value={p.monthlyCredits} onChange={(e) => upd(i, { monthlyCredits: Number(e.target.value) })} /></div>
+            <div><label className="label">AI credits / day</label><input className="input mt-1" type="number" value={p.dailyCredits} onChange={(e) => upd(i, { dailyCredits: Number(e.target.value) })} /></div>
             <div><label className="label">Period (days)</label><input className="input mt-1" type="number" value={p.periodDays ?? 30} onChange={(e) => upd(i, { periodDays: Number(e.target.value) })} /></div>
             <div><label className="label">Cloud backup (MB / user)</label><input className="input mt-1" type="number" value={p.cloudStorageMB ?? 0} onChange={(e) => upd(i, { cloudStorageMB: Number(e.target.value) })} /></div>
             <div><label className="label">Max saved items</label><input className="input mt-1" type="number" value={p.maxSavedItems ?? 0} onChange={(e) => upd(i, { maxSavedItems: Number(e.target.value) })} /></div>
@@ -218,12 +220,13 @@ function PlansTab() {
             {p.perSeat && <div><label className="label">Minimum seats</label><input className="input mt-1" type="number" value={p.minSeats ?? 3} onChange={(e) => upd(i, { minSeats: Number(e.target.value) })} /></div>}
             <div className="flex items-center gap-4 pt-5"><label className="flex items-center gap-1"><input type="checkbox" checked={p.vision} onChange={(e) => upd(i, { vision: e.target.checked })} /> image input</label><label className="flex items-center gap-1"><input type="checkbox" checked={p.localAI} onChange={(e) => upd(i, { localAI: e.target.checked })} /> offline model (desktop)</label></div>
           </div>
-          <div><label className="label">Models available to subscribers</label>
+          <PlanBudget plan={p} />
+          <div><label className="label">Models available to subscribers (≈ credits per typical question)</label>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-1">
               {PROVIDERS.filter((pr) => pr.id !== "local" && pr.id !== "ollama").map((pr) => (
                 <div key={pr.id} className="border border-border rounded-lg p-2">
                   <div className="text-xs font-medium flex items-center gap-2">{pr.label}{keys[pr.id] && !(keys[pr.id].set || keys[pr.id].fromEnv) && <span className="text-err">no key</span>}</div>
-                  {pr.models.map((m) => { const f = friendlyModel(pr.id, m.id, m.label); return <label key={m.id} className="flex items-center gap-1 text-xs mt-1"><input type="checkbox" checked={!!p.providers.find((x) => x.provider === pr.id)?.models.includes(m.id)} onChange={() => toggleModel(i, pr.id, m.id)} /> {f.name} <span className="text-muted">({TIER_LABEL[f.tier]}{m.free ? ", free tier" : ""})</span></label>; })}
+                  {pr.models.map((m) => { const f = friendlyModel(pr.id, m.id, m.label); return <label key={m.id} className="flex items-center gap-1 text-xs mt-1"><input type="checkbox" checked={!!p.providers.find((x) => x.provider === pr.id)?.models.includes(m.id)} onChange={() => toggleModel(i, pr.id, m.id)} /> {f.name} <span className="text-muted">({TIER_LABEL[f.tier]}, ≈{fmtCredits(estimateCredits(pr.id, m.id))}{modelPrice(pr.id, m.id).known ? "" : ", price unknown: charged at $3/$15"})</span></label>; })}
                 </div>
               ))}
             </div>
@@ -238,22 +241,38 @@ function PlansTab() {
   );
 }
 
+const fmtCredits = (c: number) => `${c < 10 ? c.toFixed(1) : Math.round(c)} credit${c === 1 ? "" : "s"}`;
+
+/** Worst-case cost of a plan and what its credits buy on each ticked model, so admins can price plans safely. */
+function PlanBudget({ plan }: { plan: Plan }) {
+  const worstUSD = plan.monthlyCredits * CREDIT_USD;
+  const models = planModels(plan);
+  return (
+    <div className="rounded-lg bg-elev2 px-3 py-2 text-xs grid gap-1">
+      <div>Worst-case AI cost if a user spends every credit: <b>${worstUSD.toFixed(2)} ≈ ৳{Math.round(worstUSD * USD_TO_BDT)}</b> per user per period{plan.priceMonthly > 0 && plan.currency === "BDT" ? <> ({Math.round((100 * worstUSD * USD_TO_BDT) / plan.priceMonthly)}% of the price)</> : null}.</div>
+      {models.length > 0 && <div className="text-muted">About {models.slice(0, 4).map((m) => `${Math.floor(plan.monthlyCredits / estimateCredits(m.provider, m.model))} questions on ${friendlyModel(m.provider, m.model, PROVIDERS.find((x) => x.id === m.provider)?.models.find((x) => x.id === m.model)?.label).name}`).join(" · ")} per period.</div>}
+    </div>
+  );
+}
+
 function UsageTab() {
   const [rem, setRem] = useState<string | null>(null);
   const runReminders = async () => { const r = await fetch("/api/cron/renewals"); const j = await r.json(); setRem(r.ok ? `Checked ${j.checked} accounts, sent ${j.sent.length} reminder(s)${j.sent.length ? ": " + j.sent.join(", ") : ""}` : j.error); };
-  const [data, setData] = useState<{ byDay: { day: string; requests: number; inputTokens: number; outputTokens: number }[]; byUser: { email: string; requests: number; inputTokens: number; outputTokens: number }[]; users: number; cloud?: { bytes: number; count: number; users: number; capMB: number } } | null>(null);
+  const [data, setData] = useState<{ byDay: { day: string; requests: number; inputTokens: number; outputTokens: number; credits: number }[]; byUser: { email: string; requests: number; inputTokens: number; outputTokens: number; credits: number }[]; users: number; cloud?: { bytes: number; count: number; users: number; capMB: number } } | null>(null);
   useEffect(() => { fetch("/api/admin/usage?days=30").then((r) => r.json()).then(setData); }, []);
   if (!data) return <div className="text-sm text-muted">Loading…</div>;
   const reminders = <div className="card p-4 md:col-span-2 text-sm"><div className="font-medium">Renewal reminders</div><p className="text-xs text-muted">Emails go out 7 days and 1 day before expiry and when the grace period starts (automatically once a day; on Vercel via the cron job). You can run the check now.</p><button className="btn btn-sm mt-2" onClick={runReminders}>Run reminders now</button>{rem && <div className="text-xs mt-1">{rem}</div>}</div>;
-  const tot = data.byDay.reduce((a, d) => ({ r: a.r + d.requests, t: a.t + d.inputTokens + d.outputTokens }), { r: 0, t: 0 });
+  const tot = data.byDay.reduce((a, d) => ({ r: a.r + d.requests, t: a.t + d.inputTokens + d.outputTokens, c: a.c + d.credits }), { r: 0, t: 0, c: 0 });
+  const cost = (credits: number) => `$${(credits * CREDIT_USD).toFixed(2)}`;
   return (
     <div className="grid md:grid-cols-2 gap-3">
       {reminders}
       {data.cloud && <div className="card p-4 md:col-span-2 text-sm"><div className="font-medium">Cloud backup storage (database)</div><div className="text-xs text-muted">{(data.cloud.bytes / 1048576).toFixed(1)} MB of the {data.cloud.capMB} MB safety cap used · {data.cloud.count} items · {data.cloud.users} users. The cap keeps the free database tier safe; raise CLOUD_TOTAL_CAP_MB in the environment after upgrading the database.</div><div className="w-full h-2 bg-elev2 rounded overflow-hidden mt-2"><div className="h-full bg-accent" style={{ width: `${Math.min(100, (100 * data.cloud.bytes) / (data.cloud.capMB * 1048576))}%` }} /></div></div>}
-      <div className="card p-4"><div className="label">Last 30 days</div><div className="text-2xl font-semibold mt-1">{tot.r} requests</div><div className="text-sm text-muted">{(tot.t / 1e6).toFixed(2)} M tokens · {data.users} users</div>
-        <table className="w-full text-xs mt-3"><thead><tr className="text-left text-muted"><th>Day</th><th>Requests</th><th>Tokens</th></tr></thead><tbody>{data.byDay.map((d) => <tr key={d.day} className="border-t border-border"><td className="py-0.5">{d.day}</td><td>{d.requests}</td><td>{d.inputTokens + d.outputTokens}</td></tr>)}</tbody></table></div>
+      <div className="card p-4"><div className="label">Last 30 days</div><div className="text-2xl font-semibold mt-1">{cost(tot.c)} <span className="text-base font-normal text-muted">≈ ৳{Math.round(tot.c * CREDIT_USD * USD_TO_BDT)} AI cost</span></div><div className="text-sm text-muted">{tot.r} questions · {fmtCredits(tot.c)} · {(tot.t / 1e6).toFixed(2)} M tokens · {data.users} users</div>
+        <p className="text-xs text-muted mt-1">Estimated from recorded tokens and each model&apos;s list price; your provider invoices are the final figure.</p>
+        <table className="w-full text-xs mt-3"><thead><tr className="text-left text-muted"><th>Day</th><th>Questions</th><th>Credits</th><th>Cost</th><th>Tokens</th></tr></thead><tbody>{data.byDay.map((d) => <tr key={d.day} className="border-t border-border"><td className="py-0.5">{d.day}</td><td>{d.requests}</td><td>{d.credits.toFixed(1)}</td><td>{cost(d.credits)}</td><td>{d.inputTokens + d.outputTokens}</td></tr>)}</tbody></table></div>
       <div className="card p-4"><div className="label">Top users</div>
-        <table className="w-full text-xs mt-2"><thead><tr className="text-left text-muted"><th>User</th><th>Requests</th><th>Tokens</th></tr></thead><tbody>{data.byUser.map((u) => <tr key={u.email} className="border-t border-border"><td className="py-0.5">{u.email}</td><td>{u.requests}</td><td>{u.inputTokens + u.outputTokens}</td></tr>)}</tbody></table></div>
+        <table className="w-full text-xs mt-2"><thead><tr className="text-left text-muted"><th>User</th><th>Questions</th><th>Credits</th><th>Cost</th></tr></thead><tbody>{data.byUser.map((u) => <tr key={u.email} className="border-t border-border"><td className="py-0.5">{u.email}</td><td>{u.requests}</td><td>{u.credits.toFixed(1)}</td><td>{cost(u.credits)}</td></tr>)}</tbody></table></div>
     </div>
   );
 }
