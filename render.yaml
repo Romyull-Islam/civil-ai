@@ -4,7 +4,6 @@ services:
     name: civilmate
     runtime: node
     plan: free
-    rootDir: civil-ai
     buildCommand: npm ci && npm run build && cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/
     startCommand: node .next/standalone/server.js
     healthCheckPath: /api/health
