@@ -6,6 +6,7 @@ import { TOOLS, runTool, selectToolsForText } from "@/lib/tools";
 import { AUTO_CHAIN, LOCAL_FIRST_CHAIN, PROVIDER_MAP, resolveProvider, type KeyBag } from "./registry";
 import { anthropicProvider } from "./providers/anthropic";
 import { geminiProvider } from "./providers/gemini";
+import { ungroundedNumbers } from "./grounding";
 import { makeOpenAICompatProvider } from "./providers/openaiCompat";
 import { buildSystemPrompt, buildCompactSystemPrompt, type Preferences } from "./prompt";
 import { type AgentEvent, type ChatMessage, type ContentPart, type Provider, ProviderUnavailableError } from "./types";
@@ -129,6 +130,11 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
   let nudged = false;
   let noToolNudged = false;
   let skippedEmpty = false;
+  let groundRetried = false;
+  // Where figures in the final answer may come from: the conversation as sent (user input, earlier answers, earlier
+  // tool results) plus tool results produced in this run. Our own nudge messages are deliberately excluded.
+  const groundSources: string[] = opts.messages.flatMap((m) => m.parts.map((p) => (p.type === "text" ? p.text : p.type === "tool_result" ? p.content : "")));
+  let toolsUsed = false;
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     if (opts.signal?.aborted) return;
@@ -199,7 +205,19 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
     }
     if (turn.stop === "refusal") emit({ type: "notice", message: "The model declined this request." });
     if (turn.stop === "length") emit({ type: "notice", message: "Response was cut off by the token limit." });
+    if (turn.stop === "end" && !turn.toolCalls.length && turn.text.trim() && (toolsUsed || CALC_REQUEST.test(userText))) {
+      const bad = ungroundedNumbers(turn.text, groundSources);
+      if (bad.length && !groundRetried) {
+        groundRetried = true;
+        emit({ type: "notice", message: "Double-checking the figures against the calculations…" });
+        emit({ type: "text_replace", text: "" });
+        messages.push({ role: "user", parts: [{ type: "text", text: `Your answer contains figures that are not in the tool results or in my question: ${bad.slice(0, 12).join(", ")}. Rewrite the complete answer using only numbers from the tool results (rounding is fine). If you need another number, call a tool (for example calculate) instead of working it out yourself. Do not mention this check.` }] });
+        continue;
+      }
+      if (bad.length) emit({ type: "notice", message: `Check these figures against the result tables above; they did not come from a calculation: ${bad.slice(0, 8).join(", ")}` });
+    }
     if (turn.stop !== "tool" || !turn.toolCalls.length) break;
+    toolsUsed = true;
 
     const resultParts: ChatMessage["parts"] = [];
     for (const call of turn.toolCalls) {
@@ -219,6 +237,7 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
       emit({ type: "tool_result", id: call.id, name: call.name, output });
       const content = output.error ? `ERROR: ${output.error}` : JSON.stringify({ summary: output.summary, result: output.result }, (_k, v) => (typeof v === "number" ? Number(v.toPrecision(6)) : v));
       resultParts.push({ type: "tool_result", id: call.id, name: call.name, content: content.length > 20000 ? content.slice(0, 20000) + "…(truncated)" : content, isError: !!output.error });
+      if (!output.error) groundSources.push(content);
     }
     messages.push({ role: "tool", parts: resultParts });
   }

@@ -96,25 +96,34 @@ export function rebarSchedule(items: RebarItem[], wastagePercent = 3) {
   return { rows, totalsByDiameter: byDia, totalKg: total, totalWithWastageKg: total * (1 + wastagePercent / 100) };
 }
 
-export function brickMasonry(wallVolume: number, brick = { l: 0.19, w: 0.09, h: 0.09 }, mortarThickness = 0.01, mortarRatio = 4) {
-  const bl = brick.l + mortarThickness;
-  const bw = brick.w + mortarThickness;
-  const bh = brick.h + mortarThickness;
-  const perM3 = 1 / (bl * bw * bh);
+/** Brick sizes in m: `actual` is the brick itself, `nominal` includes the mortar joints. */
+export const BRICKS = {
+  // Bangladesh standard brick 9.5" × 4.5" × 2.75" (241 × 114 × 70 mm); textbook nominal 10" × 5" × 3" → 11.5 bricks per cft.
+  bd_standard: { label: "Bangladesh standard 241×114×70 mm (9.5×4.5×2.75 in)", actual: { l: 0.2413, w: 0.1143, h: 0.0699 }, nominal: { l: 0.254, w: 0.127, h: 0.0762 } },
+  // India modular brick 190 × 90 × 90 mm with 10 mm joints → 500 per m³.
+  india_modular: { label: "India modular 190×90×90 mm", actual: { l: 0.19, w: 0.09, h: 0.09 }, nominal: { l: 0.2, w: 0.1, h: 0.1 } },
+} as const;
+export type BrickType = keyof typeof BRICKS;
+
+export function brickMasonry(wallVolume: number, brickType: BrickType = "bd_standard", mortarRatio = 4) {
+  const { label, actual, nominal } = BRICKS[brickType];
+  const perM3 = 1 / (nominal.l * nominal.w * nominal.h);
   const bricks = wallVolume * perM3;
-  const brickVol = bricks * brick.l * brick.w * brick.h;
+  const brickVol = bricks * actual.l * actual.w * actual.h;
   const wetMortar = wallVolume - brickVol;
   const dryMortar = wetMortar * 1.33 * 1.05; // dry factor + wastage
   const cementVol = dryMortar / (1 + mortarRatio);
   const cementKg = cementVol * CEMENT_DENSITY;
   return {
+    brickType,
     bricksPerM3: perM3,
+    bricksPerCft: perM3 / CFT_PER_M3,
     bricks: Math.ceil(bricks * 1.05),
     mortarWetM3: wetMortar,
     mortarDryM3: dryMortar,
     cement: { kg: cementKg, bags: Math.ceil(cementKg / CEMENT_BAG_KG) },
-    sand: { m3: (dryMortar * mortarRatio) / (1 + mortarRatio) },
-    notes: [`Brick ${brick.l * 1000}×${brick.w * 1000}×${brick.h * 1000} mm with ${mortarThickness * 1000} mm mortar (1:${mortarRatio}); 5% wastage on bricks.`],
+    sand: { m3: (dryMortar * mortarRatio) / (1 + mortarRatio), cft: ((dryMortar * mortarRatio) / (1 + mortarRatio)) * CFT_PER_M3 },
+    notes: [`${label}: ${(perM3 / CFT_PER_M3).toFixed(1)} bricks per cft (${perM3.toFixed(0)} per m³) before wastage; mortar 1:${mortarRatio}; 5% wastage on bricks.`],
   };
 }
 

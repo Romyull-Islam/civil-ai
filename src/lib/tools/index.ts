@@ -8,7 +8,7 @@ import { analyzeBeam, rectI, type BeamResult } from "@/lib/eng/beam";
 import { convert, UNIT_CATALOG } from "@/lib/eng/units";
 import { designRcBeam, designRcColumn, designOneWaySlab, designIsolatedFooting } from "@/lib/eng/rc";
 import { bearingCapacity, earthPressure } from "@/lib/eng/soil";
-import { concreteMaterials, rebarSchedule, brickMasonry, plasterQuantity, paintQuantity, tileQuantity, excavation, NOMINAL_MIXES } from "@/lib/eng/quantity";
+import { concreteMaterials, rebarSchedule, brickMasonry, plasterQuantity, paintQuantity, tileQuantity, excavation, NOMINAL_MIXES, CFT_PER_M3 } from "@/lib/eng/quantity";
 import { averageEndArea, prismoidal, gridCutFill, trapezoidalSection } from "@/lib/eng/earthwork";
 import { designSteelBeam, findSection, SECTIONS } from "@/lib/eng/steel";
 import { searchCodes } from "@/lib/eng/codes";
@@ -166,7 +166,9 @@ export const TOOLS: ToolDef[] = [
     category: "quantities",
     description: "Quantities for brick masonry (m³), plaster (m²), paint (m²), tiles (m²) and excavation. Provide any subset of inputs.",
     schema: z.object({
-      brickworkVolume: z.number().optional().describe("m³"), mortarRatio: z.number().default(4).describe("cement:sand 1:N"),
+      brickworkVolume: z.number().optional().describe("brickwork volume in volumeUnit"), volumeUnit: z.enum(["m3", "cft"]).default("m3").describe("unit of brickworkVolume"),
+      brickType: z.enum(["bd_standard", "india_modular"]).default("bd_standard").describe("bd_standard = Bangladesh 9.5×4.5×2.75 in; india_modular = 190×90×90 mm"),
+      mortarRatio: z.number().default(4).describe("cement:sand 1:N"),
       plasterArea: z.number().optional().describe("m²"), plasterThickness: z.number().default(12).describe("mm"),
       paintArea: z.number().optional().describe("m²"), coats: z.number().default(2),
       tileArea: z.number().optional().describe("m²"), tileSize: z.number().default(600).describe("mm square tile"),
@@ -175,7 +177,12 @@ export const TOOLS: ToolDef[] = [
     run: (inp) => {
       const out: Record<string, unknown> = {};
       const rows: (string | number)[][] = [];
-      if (inp.brickworkVolume) { const r = brickMasonry(inp.brickworkVolume, undefined, 0.01, inp.mortarRatio); out.brickwork = r; rows.push(["Bricks", `${r.bricks} nos`], ["Mortar cement", `${r.cement.bags} bags`], ["Mortar sand", `${r.sand.m3.toFixed(2)} m³`]); }
+      if (inp.brickworkVolume) {
+        const cft = inp.volumeUnit === "cft";
+        const r = brickMasonry(cft ? inp.brickworkVolume / CFT_PER_M3 : inp.brickworkVolume, inp.brickType, inp.mortarRatio);
+        out.brickwork = r;
+        rows.push(["Bricks", `${r.bricks} nos (${r.bricksPerCft.toFixed(1)} per cft + 5% wastage)`], ["Mortar cement", `${r.cement.bags} bags`], ["Mortar sand", cft ? `${r.sand.cft.toFixed(1)} cft` : `${r.sand.m3.toFixed(2)} m³`]);
+      }
       if (inp.plasterArea) { const r = plasterQuantity(inp.plasterArea, inp.plasterThickness / 1000, inp.mortarRatio); out.plaster = r; rows.push(["Plaster cement", `${r.cement.bags} bags`], ["Plaster sand", `${r.sand.m3.toFixed(2)} m³`]); }
       if (inp.paintArea) { const r = paintQuantity(inp.paintArea, inp.coats); out.paint = r; rows.push(["Paint", `${r.liters.toFixed(1)} L (${inp.coats} coats)`]); }
       if (inp.tileArea) { const r = tileQuantity(inp.tileArea, { l: inp.tileSize / 1000, w: inp.tileSize / 1000 }); out.tiles = r; rows.push(["Tiles", `${r.tiles} nos (${r.boxesOf4} boxes of 4)`]); }

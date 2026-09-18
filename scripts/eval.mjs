@@ -24,6 +24,11 @@ const TASKS = [
   { id: "code", prompt: "What is the minimum tension reinforcement for a beam according to IS 456? Cite the clause.", tools: ["search_code_clauses"], check: (o, text) => /26\.5\.1\.1/.test(text) || JSON.stringify(o.search_code_clauses?.result ?? "").includes("26.5.1.1") },
   { id: "bearing", prompt: "Terzaghi safe bearing capacity of a 2 m wide strip footing at 1.5 m depth: c = 10 kPa, φ = 30°, γ = 18 kN/m³, FS = 3.", tools: ["bearing_capacity"], check: (o) => { const q = o.bearing_capacity?.result?.safe; return q > 300 && q < 600; } },
   { id: "house-plan", prompt: "Plan a 2-bedroom house on a 10 m × 12 m plot with 1.5 m front and rear setbacks and 1 m side setbacks: living 20 m², kitchen 8 m², bedrooms 14 and 12 m², bathroom 3 m². Draw it.", tools: ["plan_layout"], check: (o) => { const r = o.plan_layout?.result; return r && r.rooms?.length === 5 && r.checks?.find((c) => c.name.startsWith("Fits"))?.ok === true; } },
+  // Common Bangladeshi site questions (textbook answers, feet and bags as engineers ask them)
+  { id: "bd-concrete", prompt: "How many bags of cement, cft of sand and cft of stone chips for 100 cft of 1:2:4 (M20) concrete?", tools: ["concrete_materials"], check: (o, text) => o.concrete_materials?.result?.ratio === "1:2:4" && near(o.concrete_materials?.result?.cement?.cft, 22.66, 0.03) && /\b(19|18\.5)\b/.test(text) && /\b(45|44)(\.\d+)?\b/.test(text) },
+  { id: "bd-bricks", prompt: "How many bricks are needed for a 10 inch brick wall, 20 ft long and 10 ft high?", tools: ["masonry_and_finishes"], check: (o) => { const b = o.masonry_and_finishes?.result?.brickwork; return b?.brickType === "bd_standard" && b.bricks >= 1950 && b.bricks <= 2100; } },
+  { id: "bd-land", prompt: "5 katha land is how many square feet and how many decimal?", tools: ["convert_units"], check: (_o, text) => /3,?600/.test(text) && /8\.2[0-9]/.test(text) },
+  { id: "bd-rod", prompt: "What is the total weight of 20 pieces of 12 mm rod, each 40 ft long?", tools: ["rebar_schedule"], check: (o) => near(o.rebar_schedule?.result?.totalKg, 216.5, 0.02) },
   { id: "drawing", prompt: "Draw an RC beam section 300x500 with 4 Ø16 bottom bars, 2 Ø12 top bars and Ø8 stirrups at 150 mm.", tools: ["draw_beam_section"], check: (o) => o.draw_beam_section?.result?.entities > 5 },
 ];
 const near = (a, b, tol = 0.02) => typeof a === "number" && Math.abs(a - b) <= tol * Math.max(1, Math.abs(b));
@@ -33,18 +38,23 @@ async function run(task) {
   const res = await fetch(`${BASE}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", parts: [{ type: "text", text: task.prompt }] }], provider, model, keys }) });
   const raw = await res.text();
   const evs = raw.split("\n").filter((l) => l.startsWith("data: ")).map((l) => { try { return JSON.parse(l.slice(6)); } catch { return null; } }).filter(Boolean);
-  const outputs = {}; const called = []; let text = ""; let error = null; let served = "";
+  const outputs = {}; const called = []; const notices = []; let text = ""; let error = null; let served = "";
   for (const e of evs) {
     if (e.type === "tool_call") called.push(e.name);
     if (e.type === "tool_result" && !e.output.error) outputs[e.name] = e.output;
     if (e.type === "text") text += e.delta;
     if (e.type === "text_replace") text = e.text;
     if (e.type === "error") error = e.message;
+    if (e.type === "notice") notices.push(e.message);
     if (e.type === "done") served = `${e.provider}/${e.model}`;
   }
   const toolsOk = task.tools.every((t) => called.includes(t));
   let valueOk = false; try { valueOk = !!task.check(outputs, text); } catch { valueOk = false; }
-  return { id: task.id, seconds: Math.round((Date.now() - t0) / 1000), toolsOk, valueOk, called, error, served, answered: text.trim().length > 40 };
+  // The agent re-checks every figure in the final answer against tool output; a remaining warning means invented numbers.
+  const grounded = !notices.some((n) => /did not come from a calculation/.test(n));
+  const retried = notices.some((n) => /Double-checking/.test(n));
+  const answered = text.trim().length > 40;
+  return { id: task.id, seconds: Math.round((Date.now() - t0) / 1000), ok: valueOk && grounded && answered, toolsOk, valueOk, grounded, retried, called, error, served, answered };
 }
 
 const only = args.only ? args.only.split(",") : null;
@@ -52,9 +62,10 @@ const results = [];
 for (const task of TASKS.filter((t) => !only || only.includes(t.id))) {
   const r = await run(task);
   results.push(r);
-  console.log(`${r.valueOk ? "PASS" : r.toolsOk ? "PARTIAL" : "FAIL"}  ${r.id.padEnd(14)} ${String(r.seconds).padStart(4)}s  tools=${r.called.join(",") || "-"}${r.error ? "  error=" + r.error.slice(0, 80) : ""}`);
+  const why = [!r.answered && "no answer", !r.grounded && "invented figures", r.retried && "self-corrected", r.error && "error=" + r.error.slice(0, 80)].filter(Boolean).join(", ");
+  console.log(`${r.ok ? "PASS" : r.toolsOk ? "PARTIAL" : "FAIL"}  ${r.id.padEnd(14)} ${String(r.seconds).padStart(4)}s  tools=${r.called.join(",") || "-"}${why ? "  (" + why + ")" : ""}`);
 }
-const score = results.filter((r) => r.valueOk).length;
+const score = results.filter((r) => r.ok).length;
 const summary = { provider, model, served: results[0]?.served, date: new Date().toISOString(), score: `${score}/${results.length}`, avgSeconds: Math.round(results.reduce((s, r) => s + r.seconds, 0) / results.length), results };
 console.log(`\nScore ${summary.score} correct · avg ${summary.avgSeconds}s per task · ${summary.served}`);
 const file = "docs/eval-results.json";

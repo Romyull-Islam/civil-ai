@@ -76,3 +76,29 @@ describe("empty model replies", () => {
     expect(events.find((e) => e.type === "error")).toMatchObject({ message: expect.stringMatching(/empty reply/) });
   });
 });
+
+describe("grounding retry", () => {
+  it("asks for a rewrite when the answer has a figure no tool produced", async () => {
+    const replies = [
+      [fcChunk({ thoughtSignature: "S" })],
+      [{ candidates: [{ content: { role: "model", parts: [{ text: "16 ft is 4.88 m, which is 5.2 yards." }] }, finishReason: "STOP" }] }],
+      [{ candidates: [{ content: { role: "model", parts: [{ text: "16 ft is 4.88 m." }] }, finishReason: "STOP" }] }],
+    ];
+    const bodies: { contents: { role: string; parts: { text?: string }[] }[] }[] = [];
+    const srv = http.createServer((req, res) => {
+      let b = "";
+      req.on("data", (c) => (b += c));
+      req.on("end", () => { bodies.push(JSON.parse(b)); res.writeHead(200, { "content-type": "text/event-stream" }); res.end(replies[bodies.length - 1].map((c) => `data: ${JSON.stringify(c)}\n\n`).join("")); });
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const { port } = srv.address() as AddressInfo;
+    const events: AgentEvent[] = [];
+    try {
+      await runAgent({ messages: [{ role: "user", parts: [{ type: "text", text: "convert 16 ft to m" }] }], provider: "gemini", model: "gemini-3.5-flash-lite", keys: { gemini: { apiKey: "test", baseUrl: `http://127.0.0.1:${port}` } }, emit: (e) => events.push(e) });
+    } finally { srv.close(); }
+    expect(bodies).toHaveLength(3);
+    expect(JSON.stringify(bodies[2].contents.at(-1))).toContain("5.2");
+    expect(events.some((e) => e.type === "text_replace" && e.text === "")).toBe(true);
+    expect(events.some((e) => e.type === "notice" && /did not come from a calculation/.test(e.message))).toBe(false);
+  });
+});

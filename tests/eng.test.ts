@@ -138,7 +138,13 @@ describe("quantities", () => {
     expect((out.result as { ratio: string }).ratio).toBe("1:2:4");
   });
   it("rebar 12 mm = 0.888 kg/m", () => { close(rebarKgPerM(12), 0.888, 0.01); });
-  it("bricks ≈ 500 per m³", () => { close(brickMasonry(1).bricksPerM3, 500, 0.02); });
+  it("5 katha = 3600 sft exactly = 8.26 decimal", () => {
+    expect(convert(5, "katha", "sqft").value).toBeCloseTo(3600, 6);
+    close(convert(5, "katha", "decimal").value, 8.2645, 0.0001);
+    expect(convert(1, "bigha", "katha").value).toBeCloseTo(20, 9);
+  });
+  it("India modular bricks ≈ 500 per m³", () => { close(brickMasonry(1, "india_modular").bricksPerM3, 500, 0.02); });
+  it("Bangladesh standard bricks ≈ 11.5 per cft (default)", () => { close(brickMasonry(1).bricksPerCft, 11.52, 0.01); });
 });
 
 describe("earthwork", () => {
