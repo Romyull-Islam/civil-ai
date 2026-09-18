@@ -105,7 +105,7 @@ function PlansTab() {
     else { const idx = providers.findIndex((x) => x.provider === provider); const has = providers[idx].models.includes(model); providers[idx].models = has ? providers[idx].models.filter((m) => m !== model) : [...providers[idx].models, model]; if (!providers[idx].models.length) providers = providers.filter((_, k) => k !== idx); }
     upd(i, { providers });
   };
-  const addPlan = () => setPlans([...plans, { id: `plan${plans.length + 1}`, name: "New plan", priceMonthly: 0, priceUSD: 0, currency: "BDT", dailyRequests: 50, vision: false, localAI: false, periodDays: 30, graceDays: 3, providers: [], features: [] }]);
+  const addPlan = () => setPlans([...plans, { id: `plan${plans.length + 1}`, name: "New plan", priceMonthly: 0, priceUSD: 0, currency: "BDT", dailyRequests: 50, vision: false, localAI: false, periodDays: 30, graceDays: 3, cloudStorageMB: 0, maxSavedItems: 0, providers: [], features: [] }]);
   return (
     <div className="grid gap-3">
       <p className="text-xs text-muted">Each plan lists which models its subscribers can choose in the chat selector (the first ticked model of the first provider is the default). Providers marked <span className="text-err">no key</span> will not work until a key is added in <b>Provider API keys</b>. Prices are in the plan currency (৳ BDT); the USD price is used by Stripe. <button className="text-accent2" onClick={() => setRaw(!raw)}>{raw ? "Visual editor" : "Edit as JSON"}</button></p>
@@ -120,6 +120,8 @@ function PlansTab() {
             <div><label className="label">Price USD (Stripe)</label><input className="input mt-1" type="number" step="0.1" value={p.priceUSD ?? 0} onChange={(e) => upd(i, { priceUSD: Number(e.target.value) })} /></div>
             <div><label className="label">AI requests / day</label><input className="input mt-1" type="number" value={p.dailyRequests} onChange={(e) => upd(i, { dailyRequests: Number(e.target.value) })} /></div>
             <div><label className="label">Period (days)</label><input className="input mt-1" type="number" value={p.periodDays ?? 30} onChange={(e) => upd(i, { periodDays: Number(e.target.value) })} /></div>
+            <div><label className="label">Cloud backup (MB / user)</label><input className="input mt-1" type="number" value={p.cloudStorageMB ?? 0} onChange={(e) => upd(i, { cloudStorageMB: Number(e.target.value) })} /></div>
+            <div><label className="label">Max saved items</label><input className="input mt-1" type="number" value={p.maxSavedItems ?? 0} onChange={(e) => upd(i, { maxSavedItems: Number(e.target.value) })} /></div>
             <div><label className="label">Grace (days)</label><input className="input mt-1" type="number" value={p.graceDays ?? 3} onChange={(e) => upd(i, { graceDays: Number(e.target.value) })} /></div>
             <div><label className="label">Per-seat team plan?</label><select className="select mt-1" value={p.perSeat ? "yes" : "no"} onChange={(e) => upd(i, { perSeat: e.target.value === "yes", minSeats: p.minSeats ?? 3 })}><option value="no">No (single user)</option><option value="yes">Yes (price × seats)</option></select></div>
             {p.perSeat && <div><label className="label">Minimum seats</label><input className="input mt-1" type="number" value={p.minSeats ?? 3} onChange={(e) => upd(i, { minSeats: Number(e.target.value) })} /></div>}
@@ -148,7 +150,7 @@ function PlansTab() {
 function UsageTab() {
   const [rem, setRem] = useState<string | null>(null);
   const runReminders = async () => { const r = await fetch("/api/cron/renewals"); const j = await r.json(); setRem(r.ok ? `Checked ${j.checked} accounts, sent ${j.sent.length} reminder(s)${j.sent.length ? ": " + j.sent.join(", ") : ""}` : j.error); };
-  const [data, setData] = useState<{ byDay: { day: string; requests: number; inputTokens: number; outputTokens: number }[]; byUser: { email: string; requests: number; inputTokens: number; outputTokens: number }[]; users: number } | null>(null);
+  const [data, setData] = useState<{ byDay: { day: string; requests: number; inputTokens: number; outputTokens: number }[]; byUser: { email: string; requests: number; inputTokens: number; outputTokens: number }[]; users: number; cloud?: { bytes: number; count: number; users: number; capMB: number } } | null>(null);
   useEffect(() => { fetch("/api/admin/usage?days=30").then((r) => r.json()).then(setData); }, []);
   if (!data) return <div className="text-sm text-muted">Loading…</div>;
   const reminders = <div className="card p-4 md:col-span-2 text-sm"><div className="font-medium">Renewal reminders</div><p className="text-xs text-muted">Emails go out 7 days and 1 day before expiry and when the grace period starts (automatically once a day; on Vercel via the cron job). You can run the check now.</p><button className="btn btn-sm mt-2" onClick={runReminders}>Run reminders now</button>{rem && <div className="text-xs mt-1">{rem}</div>}</div>;
@@ -156,6 +158,7 @@ function UsageTab() {
   return (
     <div className="grid md:grid-cols-2 gap-3">
       {reminders}
+      {data.cloud && <div className="card p-4 md:col-span-2 text-sm"><div className="font-medium">Cloud backup storage (database)</div><div className="text-xs text-muted">{(data.cloud.bytes / 1048576).toFixed(1)} MB of the {data.cloud.capMB} MB safety cap used · {data.cloud.count} items · {data.cloud.users} users. The cap keeps the free database tier safe; raise CLOUD_TOTAL_CAP_MB in the environment after upgrading the database.</div><div className="w-full h-2 bg-elev2 rounded overflow-hidden mt-2"><div className="h-full bg-accent" style={{ width: `${Math.min(100, (100 * data.cloud.bytes) / (data.cloud.capMB * 1048576))}%` }} /></div></div>}
       <div className="card p-4"><div className="label">Last 30 days</div><div className="text-2xl font-semibold mt-1">{tot.r} requests</div><div className="text-sm text-muted">{(tot.t / 1e6).toFixed(2)} M tokens · {data.users} users</div>
         <table className="w-full text-xs mt-3"><thead><tr className="text-left text-muted"><th>Day</th><th>Requests</th><th>Tokens</th></tr></thead><tbody>{data.byDay.map((d) => <tr key={d.day} className="border-t border-border"><td className="py-0.5">{d.day}</td><td>{d.requests}</td><td>{d.inputTokens + d.outputTokens}</td></tr>)}</tbody></table></div>
       <div className="card p-4"><div className="label">Top users</div>

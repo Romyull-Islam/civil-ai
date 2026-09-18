@@ -5,6 +5,9 @@ import { LogOut, User, ShieldCheck } from "lucide-react";
 import { useEffect } from "react";
 import { useSession, logoutClient } from "@/lib/client/session";
 
+// eslint-disable-next-line @next/next/no-img-element
+const Avatar = ({ src }: { src: string }) => <img src={src} alt="" className="w-8 h-8 rounded-full" />;
+
 export default function AccountPage() {
   const s = useSession();
   const [pw, setPw] = useState({ current: "", next: "" }); const [pwMsg, setPwMsg] = useState<string | null>(null);
@@ -21,7 +24,8 @@ export default function AccountPage() {
       <div className="flex items-center gap-2"><User className="text-accent" /><h1 className="text-lg font-semibold">Account</h1></div>
       {outcome && <div className={`card p-3 text-sm ${outcome === "paid" ? "border-ok/50 text-ok" : outcome === "pending" ? "border-accent/50" : "border-err/50 text-err"}`}>{outcome === "paid" ? "Payment received — your plan is active." : outcome === "pending" ? "Payment is being verified; your plan activates automatically once confirmed." : outcome === "cancelled" ? "Payment cancelled." : outcome === "failed" ? "Payment failed. Nothing was charged; you can try again or pay manually." : "We could not verify this payment. Contact support with your transaction ID."}</div>}
       <div className="card p-4 grid gap-2 text-sm">
-        <div><span className="label">Signed in as</span><div>{s.user.name || s.user.email} <span className="text-muted">({s.user.email})</span> {s.user.role !== "user" && <span className="badge ml-1">{s.user.role}</span>}</div></div>
+        <div><span className="label">Signed in as</span><div className="flex items-center gap-2">{s.avatar && <Avatar src={s.avatar} />}<span>{s.user.name || s.user.email} <span className="text-muted">({s.user.email})</span> {s.user.role !== "user" && <span className="badge ml-1">{s.user.role}</span>}</span></div><div className="text-[11px] text-muted">Profile picture comes from your email via Gravatar (gravatar.com).</div></div>
+        {s.cloudQuota && <div><span className="label">Cloud backups</span><div>{s.cloudQuota.limitBytes > 0 ? `${(s.cloudQuota.usedBytes / 1048576).toFixed(2)} of ${(s.cloudQuota.limitBytes / 1048576).toFixed(0)} MB used · ${s.cloudQuota.count} items` : "Not included in the Free plan"} · <Link className="text-accent2" href="/saves">manage</Link></div></div>}
         <div><span className="label">Email</span><div>{s.user.emailVerified ? <span className="text-ok">verified ✓</span> : <><span className="text-err">not verified</span> · <Link className="text-accent2" href="/verify">enter code</Link></>}</div></div>
         <div><span className="label">Plan</span><div>{s.plan?.name} {s.user.planExpires ? <span className="text-muted">· renews/expires {new Date(s.user.planExpires).toLocaleDateString()}</span> : null} · <Link className="text-accent2" href="/pricing">see plans</Link> · <Link className="text-accent2" href="/subscribe">subscribe / renew</Link></div></div>
         <div><span className="label">AI requests today</span><div>{s.usage?.used}{s.usage?.limit !== null && s.usage?.limit !== undefined ? ` / ${s.usage.limit}` : " (unlimited)"}</div></div>

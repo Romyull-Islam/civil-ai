@@ -27,7 +27,7 @@ Runs as a web app (Vercel-ready) **and** as a Windows/Linux/macOS desktop app (E
 | **Utilities** | Unit converter, exact expression calculator |
 | **Subscriptions (SaaS mode, default)** | Accounts with email verification, password reset and 2FA; superadmin/admin/support/user roles; plans (Free, Pro ৳300, Max ৳1000) with daily quotas, per-plan models and offline-model entitlement; encrypted server-held API keys; payments by manual bKash / Nagad / Rocket / Bangla QR / bank (admin approval) **or** online via bKash merchant API, aamarPay, shurjoPay, SSLCommerz, Stripe (instant activation, auto-renewal webhooks); renewal reminders and grace period; help page with FAQ and support tickets; admin panel (users, payments, tickets, keys, gateways, plans, site, usage); audit log, CSRF and security headers. Desktop app links to the service for cloud models and unlocks the local model on paid plans. See docs/08 |
 | **Teams** | Per-seat Team/Enterprise plan: owner buys N seats, adds members by email, everyone inherits the plan; admin Teams tab |
-| **Chat data** | Stored only on the user's device; delete / delete-all / export / import; auto-delete after 30 days unused; long conversations compressed before sending to the model |
+| **Chat data** | Stored only on the user's device; delete / delete-all / export / import; auto-delete after 30 days unused; long conversations compressed before sending to the model. Paid plans get plan-limited cloud backups of chats (text only) and drawings, restorable on any device |
 | **Model choice** | Switch provider/model any time from the selector under the chat box or in Settings; benchmark any model with `npm run eval` (see docs/07) |
 
 ## Quick start (web)

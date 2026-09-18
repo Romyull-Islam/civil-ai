@@ -16,22 +16,25 @@ export interface Plan {
   periodDays?: number;
   /** days after expiry during which the plan keeps working while the user renews (default 3) */
   graceDays?: number;
+  /** cloud backup allowance per user: MB of compressed chats/drawings (0 = none) and max items */
+  cloudStorageMB?: number;
+  maxSavedItems?: number;
   /** team plan: price is per seat per period; the buyer becomes the team owner and adds members */
   perSeat?: boolean;
   minSeats?: number;
 }
 
 export const DEFAULT_PLANS: Plan[] = [
-  { id: "free", name: "Free", priceMonthly: 0, priceUSD: 0, currency: "BDT", dailyRequests: 15, vision: false, localAI: false,
+  { id: "free", name: "Free", priceMonthly: 0, priceUSD: 0, currency: "BDT", dailyRequests: 15, vision: false, localAI: false, cloudStorageMB: 0, maxSavedItems: 0,
     providers: [{ provider: "gemini", models: ["gemini-3.5-flash-lite"] }, { provider: "groq", models: ["openai/gpt-oss-20b"] }],
     features: ["All calculators, drawings and code library", "15 AI requests / day", "Standard models"] },
-  { id: "pro", name: "Pro", priceMonthly: 300, priceUSD: 2.8, currency: "BDT", dailyRequests: 100, vision: true, localAI: true, periodDays: 30,
+  { id: "pro", name: "Pro", priceMonthly: 300, priceUSD: 2.8, currency: "BDT", dailyRequests: 100, vision: true, localAI: true, periodDays: 30, cloudStorageMB: 20, maxSavedItems: 300,
     providers: [{ provider: "groq", models: ["openai/gpt-oss-120b", "qwen/qwen3.6-27b"] }, { provider: "gemini", models: ["gemini-3.8-flash", "gemini-3.5-flash-lite"] }, { provider: "qwen", models: ["qwen3.6-plus"] }, { provider: "zhipu", models: ["glm-4.7-flash"] }],
-    features: ["100 AI requests / day", "Strong models (GPT-OSS 120B, Gemini 3.8 Flash, Qwen 3.6 Plus)", "Photo & drawing image analysis", "Offline local model in the desktop app", "Email support"] },
-  { id: "max", name: "Max", priceMonthly: 1000, priceUSD: 8, currency: "BDT", dailyRequests: 300, vision: true, localAI: true, periodDays: 30,
+    features: ["100 AI requests / day", "Strong models (GPT-OSS 120B, Gemini 3.8 Flash, Qwen 3.6 Plus)", "Photo & drawing image analysis", "Cloud backup of chats & designs (20 MB ≈ 400 chats)", "Offline local model in the desktop app", "Email support"] },
+  { id: "max", name: "Max", priceMonthly: 1000, priceUSD: 8, currency: "BDT", dailyRequests: 300, vision: true, localAI: true, periodDays: 30, cloudStorageMB: 50, maxSavedItems: 500,
     providers: [{ provider: "groq", models: ["openai/gpt-oss-120b", "qwen/qwen3.6-27b"] }, { provider: "gemini", models: ["gemini-3.8-flash"] }, { provider: "qwen", models: ["qwen3.6-plus", "qwen3-max"] }, { provider: "anthropic", models: ["claude-haiku-4-5", "claude-sonnet-5"] }, { provider: "openai", models: ["gpt-5-mini"] }],
-    features: ["300 AI requests / day", "Premium models incl. Claude Sonnet 5 and Qwen 3 Max", "Offline local model in the desktop app", "Priority support"] },
-  { id: "team", name: "Team / Enterprise", priceMonthly: 800, priceUSD: 6.5, currency: "BDT", dailyRequests: 300, vision: true, localAI: true, periodDays: 30, graceDays: 5, perSeat: true, minSeats: 3,
+    features: ["300 AI requests / day", "Premium models incl. Claude Sonnet 5 and Qwen 3 Max", "Cloud backup of chats & designs (50 MB ≈ 1,000 chats)", "Offline local model in the desktop app", "Priority support"] },
+  { id: "team", name: "Team / Enterprise", priceMonthly: 800, priceUSD: 6.5, currency: "BDT", dailyRequests: 300, vision: true, localAI: true, periodDays: 30, graceDays: 5, perSeat: true, minSeats: 3, cloudStorageMB: 50, maxSavedItems: 500,
     providers: [{ provider: "groq", models: ["openai/gpt-oss-120b", "qwen/qwen3.6-27b"] }, { provider: "gemini", models: ["gemini-3.8-flash"] }, { provider: "qwen", models: ["qwen3.6-plus", "qwen3-max"] }, { provider: "anthropic", models: ["claude-haiku-4-5", "claude-sonnet-5"] }, { provider: "openai", models: ["gpt-5-mini"] }],
     features: ["Everything in Max, for every team member", "৳800 per user / month (min 3 users)", "Owner adds and removes members", "One invoice for the whole team", "Priority support"] },
 ];

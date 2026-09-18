@@ -10,6 +10,9 @@ export interface SessionInfo {
   renewal?: { status: "none" | "ok" | "expiring" | "grace" | "expired"; daysLeft: number | null };
   plans?: { id: string; name: string; priceMonthly: number; currency: string; dailyRequests: number; features: string[]; perSeat?: boolean; minSeats?: number }[];
   inTeam?: boolean;
+  avatar?: string;
+  /** SaaS: cloud backup quota (desktop/byok reuse `cloud` for the linked account instead) */
+  cloudQuota?: { limitBytes: number; usedBytes: number; maxItems: number; count: number };
   /** desktop/byok: linked hosted account */
   cloud?: { linked: boolean; backendUrl?: string; email?: string; offline?: boolean; allowedModels?: { provider: string; model: string }[]; plan?: { name: string }; usage?: { used: number; limit: number | null; remaining: number | null } };
 }
@@ -18,7 +21,8 @@ let cache: SessionInfo | null = null;
 const listeners = new Set<() => void>();
 export async function refreshSession(): Promise<SessionInfo> {
   const r = await fetch("/api/auth/me", { cache: "no-store" });
-  const info = (await r.json()) as SessionInfo;
+  const raw = (await r.json()) as SessionInfo & { cloud?: unknown };
+  const info: SessionInfo = raw.mode === "saas" ? { ...raw, cloudQuota: raw.cloud as SessionInfo["cloudQuota"], cloud: undefined } : raw;
   if (info.mode !== "saas") { try { info.cloud = await (await fetch("/api/cloud/me", { cache: "no-store" })).json(); } catch { /* offline */ } }
   cache = info;
   listeners.forEach((l) => l());

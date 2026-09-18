@@ -10,10 +10,12 @@ export interface AppSettings {
   theme: "dark" | "light" | "system";
   /** delete conversations not opened for this many days (0 = keep forever) */
   autoDeleteDays: number;
+  /** SaaS paid plans: back up each chat to the account after every answer */
+  autoBackup: boolean;
 }
 
 const KEY = "civil-ai.settings.v1";
-export const DEFAULT_SETTINGS: AppSettings = { provider: typeof window !== "undefined" && (window as unknown as { civilAI?: { desktop?: boolean } }).civilAI?.desktop ? "local-first" : "auto", keys: {}, preferences: { designCode: "BNBC 2020 (Bangladesh)", units: "SI", region: "Bangladesh" }, theme: "dark", autoDeleteDays: 30 };
+export const DEFAULT_SETTINGS: AppSettings = { provider: typeof window !== "undefined" && (window as unknown as { civilAI?: { desktop?: boolean } }).civilAI?.desktop ? "local-first" : "auto", keys: {}, preferences: { designCode: "BNBC 2020 (Bangladesh)", units: "SI", region: "Bangladesh" }, theme: "dark", autoDeleteDays: 30, autoBackup: false };
 
 let cache: AppSettings | null = null;
 

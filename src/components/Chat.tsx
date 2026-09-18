@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
-import { Send, Square, Plus, Trash2, ImagePlus, X, Sparkles, Download, Upload } from "lucide-react";
+import { Send, Square, Plus, Trash2, ImagePlus, X, Sparkles, Download, Upload, CloudUpload } from "lucide-react";
 import { db, type Conversation, type UIMessage } from "@/lib/db";
 import { useSettings } from "@/lib/client/settings";
 import { streamChat } from "@/lib/client/stream";
@@ -52,6 +52,13 @@ export function Chat() {
     cleanup.catch(() => 0).then(() => db.conversations.orderBy("updatedAt").reverse().limit(200).toArray()).then((rows) => { if (alive) setConvs(rows); });
     return () => { alive = false; };
   }, [settings.autoDeleteDays]);
+  const [backupMsg, setBackupMsg] = useState<string | null>(null);
+  const backup = async (c: Conversation, silent = false) => {
+    const r = await fetch("/api/saves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id, kind: "chat", title: c.title, payload: c }) });
+    const j = await r.json();
+    if (!silent) { setBackupMsg(r.ok ? "Backed up to your account." : j.error); setTimeout(() => setBackupMsg(null), 4000); }
+    if (r.ok) refreshSession().catch(() => {});
+  };
   const deleteAll = async () => { if (!confirm("Delete all conversations stored on this device?")) return; await db.conversations.clear(); setConv(null); refreshList(); };
   const exportAll = async () => { const rows = await db.conversations.toArray(); const blob = new Blob([JSON.stringify({ app: "civil-ai", version: 1, exportedAt: new Date().toISOString(), conversations: rows }, null, 1)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `civil-ai-chats-${new Date().toISOString().slice(0, 10)}.json`; a.click(); };
   const importFile = async (f: File | null) => { if (!f) return; try { const j = JSON.parse(await f.text()) as { conversations?: Conversation[] }; if (!Array.isArray(j.conversations)) throw new Error("bad file"); await db.conversations.bulkPut(j.conversations); refreshList(); } catch { alert("Not a Civil AI chat export."); } };
@@ -112,6 +119,7 @@ export function Chat() {
       if (session?.mode === "saas") refreshSession().catch(() => {});
       void textBuf;
       await persist(current);
+      if (session?.mode === "saas" && settings.autoBackup && (session.cloudQuota?.limitBytes ?? 0) > 0) backup(current, true).catch(() => {});
     }
   };
 
@@ -125,6 +133,7 @@ export function Chat() {
           {convs.map((c) => (
             <div key={c.id} className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm cursor-pointer ${conv?.id === c.id ? "bg-elev2" : "hover:bg-elev2"}`} onClick={() => openConversation(c.id)}>
               <span className="truncate flex-1">{c.title}</span>
+              {session?.mode === "saas" && (session.cloudQuota?.limitBytes ?? 0) > 0 && <button className="opacity-0 group-hover:opacity-100 text-muted hover:text-accent2" onClick={(e) => { e.stopPropagation(); backup(c); }} aria-label="Back up to cloud" title="Back up to my account"><CloudUpload size={14} /></button>}
               <button className="opacity-0 group-hover:opacity-100 text-muted hover:text-err" onClick={(e) => { e.stopPropagation(); deleteConversation(c.id); }} aria-label="Delete"><Trash2 size={14} /></button>
             </div>
           ))}
@@ -133,6 +142,7 @@ export function Chat() {
         <div className="p-2 border-t border-border grid gap-1 text-xs">
           <div className="flex gap-1"><button className="btn btn-sm flex-1 justify-center" onClick={exportAll} title="Download all chats as a file you can keep or import on another PC"><Download size={13} /> Export</button><label className="btn btn-sm flex-1 justify-center cursor-pointer"><Upload size={13} /> Import<input type="file" accept="application/json" hidden onChange={(e) => importFile(e.target.files?.[0] ?? null)} /></label></div>
           <button className="btn btn-sm justify-center text-err" onClick={deleteAll}><Trash2 size={13} /> Delete all chats</button>
+          {backupMsg && <div className="text-ok">{backupMsg}</div>}
           <div className="text-muted">Auto-delete after {settings.autoDeleteDays > 0 ? `${settings.autoDeleteDays} days unused` : "never"} (change in Settings)</div>
         </div>
       </aside>

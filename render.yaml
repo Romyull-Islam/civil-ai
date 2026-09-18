@@ -1,7 +1,7 @@
-# Render Blueprint: free web service + free Postgres. Deploy: New → Blueprint → select this repo.
+# Render Blueprint: free web service (database on Aiven/Neon). Deploy: New → Blueprint → select this repo.
 services:
   - type: web
-    name: civil-ai
+    name: civilmate
     runtime: node
     plan: free
     rootDir: civil-ai
@@ -18,9 +18,9 @@ services:
       - key: HOSTNAME
         value: 0.0.0.0
       - key: DATABASE_URL
-        fromDatabase:
-          name: civil-ai-db
-          property: connectionString
+        sync: false   # paste the Aiven (or Neon) Service URI in the Render dashboard
+      - key: CLOUD_TOTAL_CAP_MB
+        value: "700"
       - key: CIVIL_AI_SECRET
         generateValue: true
       - key: CRON_SECRET
@@ -45,6 +45,4 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
-databases:
-  - name: civil-ai-db
-    plan: free
+# Database: external free Postgres (Aiven 1 GB / Neon 0.5 GB) — Render's own free Postgres is deleted after 30 days.

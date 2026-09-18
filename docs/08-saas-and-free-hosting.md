@@ -35,7 +35,10 @@ Cost check: Free-plan traffic rides on provider free tiers; a Pro user at 300 re
 
 Vercel Hobby is free but for **non-commercial** use — fine for testing and the beta; move to Vercel Pro ($20/mo) or a $5 VPS when you start charging.
 
-1. **Database (free)**: create a project at https://neon.tech → copy the connection string (`postgres://…?sslmode=require`). (Supabase Free also works: Project → Settings → Database → URI. It pauses after 7 idle days.)
+1. **Database (free)** — pick one:
+   - **Aiven for PostgreSQL (recommended free option)**: https://console.aiven.io/signup → Create service → PostgreSQL → plan **Free** (1 GB storage, 1 GB RAM, no card, no expiry) → region Singapore → copy the *Service URI* (`postgres://avnadmin:...@...aivencloud.com:12345/defaultdb?sslmode=require`) as `DATABASE_URL`. Set `CLOUD_TOTAL_CAP_MB=700`.
+   - **Neon**: https://neon.tech → 0.5 GB per project, excellent restore/branching; keep `CLOUD_TOTAL_CAP_MB` at the default 350.
+   - Supabase Free (0.5 GB, pauses after 7 idle days) also works. CockroachDB dropped its free plan on 15 Sept 2026 (30-day trial only) — do not use it.
 2. **Repository**: push `civil-ai/` to GitHub.
 3. **Vercel**: https://vercel.com/new → import the repo → Root Directory `civil-ai` → Environment Variables:
 
@@ -110,7 +113,8 @@ Admin → *Plans* is a visual editor: for each plan tick the exact models its su
 - Conversations are stored **only on the user's device** (browser IndexedDB, or the desktop app's profile). The server stores accounts, plans, payments, tickets and usage counters — never chat content. Model providers are stateless: each request resends the needed history and they keep nothing for us, so there is no storage cost on your side.
 - Long conversations are **compressed before sending**: images and old tool outputs are summarised, and if the history is still above the model budget the oldest turns are dropped with a note (the user's stored chat is untouched).
 - Users can delete any chat, delete all chats, **export** all chats to a JSON file (keep on their PC / move to another device) and **import** them back. Chats not opened for 30 days are deleted automatically (user-adjustable in Settings: 7 days … never).
-- Trade-off: web users switching browsers/devices do not see old chats unless they export/import. Server-side sync for paid plans can be added later (it would then cost storage).
+- **Cloud backups (paid plans):** each plan has a per-user allowance (`cloudStorageMB`, `maxSavedItems`; defaults Pro 20 MB / 300 items, Max & Team 50 MB / 500 items, Free none; on Aiven's 1 GB set `CLOUD_TOTAL_CAP_MB=700` (≈ 35 fully-used Pro accounts or hundreds of typical ones); a global safety cap `CLOUD_TOTAL_CAP_MB` (default 350) pauses new backups before the tier is exhausted and the admin Usage tab shows the total; edit in Admin → Plans). Users back up a chat from the sidebar cloud icon (or turn on automatic backup in Settings) and save drawings from the drawing toolbar; *Cloud backups* page lists, restores (to any device) and deletes items with a usage bar. Chats are stored **text only** (images stripped) and gzip-compressed — a long chat is 20–60 KB, a drawing 2–20 KB — so 20 MB ≈ 500 chats; the database stays tiny. Limits are enforced server-side (bytes and item count).
+- Profile pictures come from the user's email via Gravatar (no storage).
 
 ## Online payment gateways (built in — add credentials when you have them)
 

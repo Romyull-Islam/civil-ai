@@ -104,6 +104,7 @@ export default function SettingsPage() {
             <div><label className="label">Auto-delete chats unused for</label>
               <select className="select mt-1" value={s.autoDeleteDays} onChange={(e) => update({ autoDeleteDays: Number(e.target.value) })}><option value={0}>Never (keep forever)</option><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option><option value={365}>1 year</option></select>
               <div className="text-[11px] text-muted mt-0.5">Chats live only on this device. Export them from the chat sidebar to keep a copy or move to another PC.</div></div>
+            {saas && <div><label className="label">Cloud backup of chats</label><select className="select mt-1" value={s.autoBackup ? "on" : "off"} onChange={(e) => update({ autoBackup: e.target.value === "on" })}><option value="off">Manual (cloud button per chat)</option><option value="on">Automatic after every answer (paid plans)</option></select><div className="text-[11px] text-muted mt-0.5">Text only; images are not uploaded. Counts against your plan&apos;s cloud storage.</div></div>}
             <div><label className="label">Theme</label>
               <select className="select mt-1" value={s.theme} onChange={(e) => update({ theme: e.target.value as AppSettings["theme"] })}><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select></div>
           </div>

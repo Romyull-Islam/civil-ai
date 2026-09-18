@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { MessageSquare, Calculator, PencilRuler, BookOpen, Settings, HardHat, Menu, X, Shield, User, CreditCard, LifeBuoy, Users } from "lucide-react";
+import { MessageSquare, Calculator, PencilRuler, BookOpen, Settings, HardHat, Menu, X, Shield, User, CreditCard, LifeBuoy, Users, Cloud } from "lucide-react";
 import { useSession } from "@/lib/client/session";
 import { useSettings } from "@/lib/client/settings";
 
@@ -14,13 +14,16 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
+// eslint-disable-next-line @next/next/no-img-element
+const Avatar = ({ src }: { src: string }) => <img src={src} alt="" className="w-6 h-6 rounded-full" />;
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
   const settings = useSettings();
   const session = useSession();
   const saas = session?.mode === "saas";
-  const nav = [...NAV, ...(saas ? [{ href: "/pricing", label: "Plans", icon: CreditCard }, { href: "/account", label: "Account", icon: User }, ...(session?.inTeam ? [{ href: "/team", label: "Team", icon: Users }] : []), { href: "/help", label: "Help", icon: LifeBuoy }] : []), ...(saas && session?.user && session.user.role !== "user" ? [{ href: "/admin", label: session.user.role === "support" ? "Helpdesk" : "Admin", icon: Shield }] : [])];
+  const nav = [...NAV, ...(saas ? [{ href: "/pricing", label: "Plans", icon: CreditCard }, { href: "/account", label: "Account", icon: User }, { href: "/saves", label: "Cloud backups", icon: Cloud }, ...(session?.inTeam ? [{ href: "/team", label: "Team", icon: Users }] : []), { href: "/help", label: "Help", icon: LifeBuoy }] : []), ...(saas && session?.user && session.user.role !== "user" ? [{ href: "/admin", label: session.user.role === "support" ? "Helpdesk" : "Admin", icon: Shield }] : [])];
   const authPage = ["/login", "/signup", "/verify", "/forgot", "/reset"].includes(path);
   useEffect(() => {
     const dark = settings.theme === "dark" || (settings.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -48,7 +51,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
-        {saas && session?.user && <div className="px-3 py-2 text-xs text-muted border-t border-border truncate">{session.user.email} · <span className="text-fg">{session.plan?.name}</span>{session.usage?.limit != null ? ` · ${session.usage.remaining} left today` : ""}</div>}
+        {saas && session?.user && <div className="px-3 py-2 text-xs text-muted border-t border-border truncate flex items-center gap-2">{session.avatar && <Avatar src={session.avatar} />}<span className="truncate">{session.user.email} · <span className="text-fg">{session.plan?.name}</span>{session.usage?.limit != null ? ` · ${session.usage.remaining} left today` : ""}</span></div>}
         <div className="mt-auto p-3 text-[11px] text-muted leading-snug border-t border-border">
           Preliminary calculations only. Final designs must be verified by a licensed engineer.
         </div>

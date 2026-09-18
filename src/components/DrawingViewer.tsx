@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
-import { Download, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
+import { Download, ZoomIn, ZoomOut, Maximize2, CloudUpload } from "lucide-react";
+import { useSession } from "@/lib/client/session";
 import type { Drawing } from "@/lib/drawing/types";
 import { toDxf } from "@/lib/drawing/dxf";
 import { toSvg } from "@/lib/drawing/svg";
@@ -16,6 +17,9 @@ function download(name: string, content: string | Blob, type = "text/plain") {
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "drawing";
 
 export function DrawingViewer({ drawing, svg, height = 360 }: { drawing: Drawing; svg?: string; height?: number }) {
+  const session = useSession();
+  const [saved, setSaved] = useState<string | null>(null);
+  const saveToAccount = async () => { const r = await fetch("/api/saves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "drawing", title: drawing.title, payload: drawing }) }); const j = await r.json(); setSaved(r.ok ? "Saved to your account" : j.error); setTimeout(() => setSaved(null), 4000); };
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
@@ -49,6 +53,7 @@ export function DrawingViewer({ drawing, svg, height = 360 }: { drawing: Drawing
           <button className="btn btn-sm" onClick={() => download(`${slug(drawing.title)}.dxf`, toDxf(drawing), "application/dxf")} title="Download DXF (AutoCAD, BricsCAD, LibreCAD, Revit)"><Download size={14} /> DXF</button>
           <button className="btn btn-sm" onClick={() => download(`${slug(drawing.title)}.svg`, markup, "image/svg+xml")}><Download size={14} /> SVG</button>
           <button className="btn btn-sm" onClick={exportPng}><Download size={14} /> PNG</button>
+          {session?.mode === "saas" && (session.cloudQuota?.limitBytes ?? 0) > 0 && <button className="btn btn-sm" onClick={saveToAccount} title="Save to my account (cloud)"><CloudUpload size={14} /> Save</button>}
         </div>
       </div>
       <div
@@ -63,6 +68,7 @@ export function DrawingViewer({ drawing, svg, height = 360 }: { drawing: Drawing
           <div className="w-full h-full [&>svg]:w-full [&>svg]:h-full" dangerouslySetInnerHTML={{ __html: markup }} />
         </div>
       </div>
+      {saved && <div className="px-3 py-1 text-xs text-ok border-t border-border">{saved}</div>}
       {drawing.notes?.length ? <div className="px-3 py-2 text-xs text-muted border-t border-border">{drawing.notes.join(" · ")}</div> : null}
     </div>
   );

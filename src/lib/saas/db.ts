@@ -10,6 +10,7 @@ export const isStaff = (r: Role) => r !== "user";
 export interface User { id: string; email: string; name: string; passwordHash: string; role: Role; plan: string; planExpires: number | null; createdAt: number; disabled: number; emailVerified: number; verifyCode: string | null; verifyExpires: number | null }
 export interface Payment { id: string; userId: string; email: string; plan: string; method: string; amount: number; currency: string; txnId: string; sender: string; status: "pending" | "approved" | "rejected"; note: string; createdAt: number; reviewedAt: number | null; seats: number }
 export interface Team { id: string; name: string; ownerId: string; plan: string; seats: number; expires: number | null; createdAt: number }
+export interface Save { id: string; userId: string; kind: "chat" | "drawing"; title: string; size: number; data: string /* base64 gzip json */; createdAt: number; updatedAt: number }
 export interface Ticket { id: string; userId: string | null; email: string; subject: string; message: string; status: "open" | "answered" | "closed"; reply: string; createdAt: number; updatedAt: number }
 export interface Session { token: string; userId: string; expires: number }
 export interface UsageRow { day: string; requests: number; inputTokens: number; outputTokens: number }
@@ -51,6 +52,12 @@ export interface DB {
   removeTeamMember(teamId: string, userId: string): Promise<void>;
   listTeamMembers(teamId: string): Promise<User[]>;
   deleteTeam(id: string): Promise<void>;
+  upsertSave(sv: Save): Promise<void>;
+  listSaves(userId: string): Promise<Omit<Save, "data">[]>;
+  getSave(userId: string, id: string): Promise<Save | null>;
+  deleteSave(userId: string, id: string): Promise<void>;
+  savesUsage(userId: string): Promise<{ bytes: number; count: number }>;
+  savesTotal(): Promise<{ bytes: number; count: number; users: number }>;
 }
 
 const SCHEMA = (big: string) => [
@@ -61,6 +68,8 @@ const SCHEMA = (big: string) => [
   `CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, email TEXT NOT NULL, plan TEXT NOT NULL, method TEXT NOT NULL, amount REAL NOT NULL, currency TEXT NOT NULL, txn_id TEXT NOT NULL, sender TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', note TEXT NOT NULL DEFAULT '', created_at ${big} NOT NULL, reviewed_at ${big})`,
   `CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL, plan TEXT NOT NULL, seats INTEGER NOT NULL DEFAULT 3, expires ${big}, created_at ${big} NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS team_members (team_id TEXT NOT NULL, user_id TEXT NOT NULL, added_at ${big} NOT NULL, PRIMARY KEY (team_id, user_id))`,
+  `CREATE TABLE IF NOT EXISTS saves (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, created_at ${big} NOT NULL, updated_at ${big} NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS saves_user ON saves (user_id, updated_at)`,
   `CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, user_id TEXT, email TEXT NOT NULL, subject TEXT NOT NULL, message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', reply TEXT NOT NULL DEFAULT '', created_at ${big} NOT NULL, updated_at ${big} NOT NULL)`,
 ];
 /** Additive migrations (ignored when the column already exists). */
@@ -75,6 +84,7 @@ type Row = Record<string, unknown>;
 const toUser = (r: Row): User => ({ id: String(r.id), email: String(r.email), name: String(r.name ?? ""), passwordHash: String(r.password_hash), role: (ROLES as string[]).includes(String(r.role)) ? (r.role as Role) : "user", plan: String(r.plan), planExpires: r.plan_expires == null ? null : Number(r.plan_expires), createdAt: Number(r.created_at), disabled: Number(r.disabled ?? 0), emailVerified: Number(r.email_verified ?? 0), verifyCode: r.verify_code == null ? null : String(r.verify_code), verifyExpires: r.verify_expires == null ? null : Number(r.verify_expires) });
 const toPayment = (r: Row): Payment => ({ id: String(r.id), userId: String(r.user_id), email: String(r.email), plan: String(r.plan), method: String(r.method), amount: Number(r.amount), currency: String(r.currency), txnId: String(r.txn_id), sender: String(r.sender ?? ""), status: r.status as Payment["status"], note: String(r.note ?? ""), createdAt: Number(r.created_at), reviewedAt: r.reviewed_at == null ? null : Number(r.reviewed_at), seats: Number(r.seats ?? 1) });
 const toTeam = (r: Row): Team => ({ id: String(r.id), name: String(r.name), ownerId: String(r.owner_id), plan: String(r.plan), seats: Number(r.seats), expires: r.expires == null ? null : Number(r.expires), createdAt: Number(r.created_at) });
+const toSave = (r: Row): Save => ({ id: String(r.id), userId: String(r.user_id), kind: r.kind === "drawing" ? "drawing" : "chat", title: String(r.title), size: Number(r.size), data: String(r.data ?? ""), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) });
 const toTicket = (r: Row): Ticket => ({ id: String(r.id), userId: r.user_id == null ? null : String(r.user_id), email: String(r.email), subject: String(r.subject), message: String(r.message), status: r.status as Ticket["status"], reply: String(r.reply ?? ""), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) });
 const toUsage = (r: Row | undefined): UsageRow => ({ day: String(r?.day ?? ""), requests: Number(r?.requests ?? 0), inputTokens: Number(r?.input_tokens ?? 0), outputTokens: Number(r?.output_tokens ?? 0) });
 const dayCutoff = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
@@ -94,7 +104,7 @@ function makeDB(run: (sql: string, params?: unknown[]) => Promise<void>, all: (s
       if (!cols.length) return;
       await run(`UPDATE users SET ${cols.join(", ")} WHERE id = ?`, [...vals, id]);
     },
-    async deleteUser(id) { await run("DELETE FROM sessions WHERE user_id = ?", [id]); await run("DELETE FROM users WHERE id = ?", [id]); },
+    async deleteUser(id) { await run("DELETE FROM sessions WHERE user_id = ?", [id]); await run("DELETE FROM saves WHERE user_id = ?", [id]); await run("DELETE FROM team_members WHERE user_id = ?", [id]); await run("DELETE FROM users WHERE id = ?", [id]); },
     async listUsers(limit = 500) { return (await all("SELECT * FROM users ORDER BY created_at DESC LIMIT ?", [limit])).map(toUser); },
     async countUsers() { return Number((await one("SELECT COUNT(*) AS n FROM users"))?.n ?? 0); },
     async createSession(s) { await run("INSERT INTO sessions (token, user_id, expires) VALUES (?,?,?)", [s.token, s.userId, s.expires]); },
@@ -124,6 +134,12 @@ function makeDB(run: (sql: string, params?: unknown[]) => Promise<void>, all: (s
     async removeTeamMember(teamId, userId) { await run("DELETE FROM team_members WHERE team_id = ? AND user_id = ?", [teamId, userId]); },
     async listTeamMembers(teamId) { return (await all("SELECT u.* FROM users u JOIN team_members m ON m.user_id = u.id WHERE m.team_id = ? ORDER BY m.added_at", [teamId])).map(toUser); },
     async deleteTeam(id) { await run("DELETE FROM team_members WHERE team_id = ?", [id]); await run("DELETE FROM teams WHERE id = ?", [id]); },
+    async upsertSave(sv) { await run("DELETE FROM saves WHERE id = ? AND user_id = ?", [sv.id, sv.userId]); await run("INSERT INTO saves (id, user_id, kind, title, size, data, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)", [sv.id, sv.userId, sv.kind, sv.title, sv.size, sv.data, sv.createdAt, sv.updatedAt]); },
+    async listSaves(userId) { return (await all("SELECT id, user_id, kind, title, size, created_at, updated_at FROM saves WHERE user_id = ? ORDER BY updated_at DESC LIMIT 2000", [userId])).map((r) => { const { data: _d, ...rest } = toSave({ ...r, data: "" }); void _d; return rest; }); },
+    async getSave(userId, id) { const r = await one("SELECT * FROM saves WHERE id = ? AND user_id = ?", [id, userId]); return r ? toSave(r) : null; },
+    async deleteSave(userId, id) { await run("DELETE FROM saves WHERE id = ? AND user_id = ?", [id, userId]); },
+    async savesUsage(userId) { const r = await one("SELECT COALESCE(SUM(size),0) AS bytes, COUNT(*) AS n FROM saves WHERE user_id = ?", [userId]); return { bytes: Number(r?.bytes ?? 0), count: Number(r?.n ?? 0) }; },
+    async savesTotal() { const r = await one("SELECT COALESCE(SUM(size),0) AS bytes, COUNT(*) AS n, COUNT(DISTINCT user_id) AS u FROM saves"); return { bytes: Number(r?.bytes ?? 0), count: Number(r?.n ?? 0), users: Number(r?.u ?? 0) }; },
     async usageByUser(days, limit = 50) { return (await all("SELECT u.user_id, us.email, SUM(u.requests) AS requests, SUM(u.input_tokens) AS input_tokens, SUM(u.output_tokens) AS output_tokens FROM usage u JOIN users us ON us.id = u.user_id WHERE u.day >= ? GROUP BY u.user_id, us.email ORDER BY requests DESC LIMIT ?", [dayCutoff(days), limit])).map((r) => ({ ...toUsage(r), userId: String(r.user_id), email: String(r.email) })); },
   };
 }
@@ -142,7 +158,15 @@ async function sqliteDB(): Promise<DB> {
 
 async function postgresDB(url: string): Promise<DB> {
   const { Pool } = await import("pg");
-  const pool = new Pool({ connectionString: url, ssl: /localhost|127\.0\.0\.1/.test(url) ? undefined : { rejectUnauthorized: false } });
+  // Managed Postgres (Aiven, Neon, Supabase, Render) uses TLS; newer `pg` versions treat sslmode=require in the URL as strict
+  // verification, which fails on provider-issued CAs. We strip sslmode from the URL and control TLS here:
+  // DATABASE_CA_CERT (PEM text) → strict verification against that CA; otherwise encrypted but not CA-verified.
+  const u = new URL(url);
+  const local = /localhost|127\.0\.0\.1/.test(u.hostname);
+  const wantsSsl = !local && u.searchParams.get("sslmode") !== "disable";
+  u.searchParams.delete("sslmode");
+  const ca = process.env.DATABASE_CA_CERT;
+  const pool = new Pool({ connectionString: u.toString(), ssl: wantsSsl ? (ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false }) : undefined, max: 5, idleTimeoutMillis: 30000 });
   const pgify = (sql: string) => { let i = 0; return sql.replace(/\?/g, () => `$${++i}`); };
   return makeDB(async (sql, p) => { await pool.query(pgify(sql), p ?? []); }, async (sql, p) => (await pool.query(pgify(sql), p ?? [])).rows as Row[], "BIGINT",
     "INSERT INTO usage (user_id, day, requests, input_tokens, output_tokens) VALUES (?,?,?,?,?) ON CONFLICT (user_id, day) DO UPDATE SET requests = usage.requests + EXCLUDED.requests, input_tokens = usage.input_tokens + EXCLUDED.input_tokens, output_tokens = usage.output_tokens + EXCLUDED.output_tokens");
