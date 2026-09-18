@@ -128,6 +128,7 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
   const repeatFailures = new Map<string, number>();
   let nudged = false;
   let noToolNudged = false;
+  let skippedEmpty = false;
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     if (opts.signal?.aborted) return;
@@ -176,11 +177,25 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
     for (const c of turn.toolCalls) assistantParts.push({ type: "tool_call", id: c.id, name: c.name, args: c.args, ...(c.signature ? { signature: c.signature } : {}) });
     if (assistantParts.length) messages.push({ role: "assistant", parts: assistantParts });
 
-    // Some local/OpenAI-compatible backends return an empty turn right after tool results; nudge once to continue.
-    if (!turn.text.trim() && !turn.toolCalls.length && turn.stop === "end" && messages[messages.length - 1]?.role === "tool" && !nudged) {
-      nudged = true;
-      messages.push({ role: "user", parts: [{ type: "text", text: "Continue with the next step using the tool result above (call the next tool or give the final answer)." }] });
-      continue;
+    // Some backends (local models, gpt-oss on Groq) occasionally return a turn with no text and no tool call,
+    // e.g. when all output went to hidden reasoning. Nudge once; if it stays empty, move to the next model or say so.
+    if (!turn.text.trim() && !turn.toolCalls.length && (turn.stop === "end" || turn.stop === "length")) {
+      if (!nudged) {
+        nudged = true;
+        const afterTool = messages[messages.length - 1]?.role === "tool";
+        messages.push({ role: "user", parts: [{ type: "text", text: afterTool ? "Continue with the next step using the tool result above (call the next tool or give the final answer)." : "Please answer my question above. Call the appropriate tool if any calculation is needed." }] });
+        continue;
+      }
+      const next: Cand | undefined = cands[cands.indexOf(active) + 1];
+      if (next && !skippedEmpty) {
+        skippedEmpty = true;
+        emit({ type: "notice", message: `${PROVIDER_MAP.get(active.id)?.label ?? active.id} returned an empty reply; trying ${PROVIDER_MAP.get(next.id)?.label ?? next.id}…` });
+        emit({ type: "provider", provider: next.id, model: next.model });
+        active = next; provider = providerFor(next.id);
+        continue;
+      }
+      emit({ type: "error", message: "The model returned an empty reply. Try again, or pick another model below." });
+      return;
     }
     if (turn.stop === "refusal") emit({ type: "notice", message: "The model declined this request." });
     if (turn.stop === "length") emit({ type: "notice", message: "Response was cut off by the token limit." });

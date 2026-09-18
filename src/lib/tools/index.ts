@@ -150,7 +150,7 @@ export const TOOLS: ToolDef[] = [
       return {
         result: r,
         display: { kind: "table", title: `${r.ratio}${r.grade ? ` (${r.grade})` : ""} concrete, ${inp.volume} ${u}, wastage ${inp.wastagePercent}%`, columns: ["Material", "Quantity"], rows: [["Cement", `${r.cement.bags} bags of 50 kg (${r.cement.bagsExact.toFixed(1)} exact, ${r.cement.kg.toFixed(0)} kg)`], ["Sand", q(r.sand)], ["Stone chips / aggregate", q(r.aggregate)], ["Water", `${r.water.liters.toFixed(0)} L`]] },
-        summary: `${r.ratio}: ${r.cement.bags} bags cement, sand ${q(r.sand)}, stone chips ${q(r.aggregate)}`,
+        summary: `${r.ratio}: ${r.cement.bags} bags cement, sand ${q(r.sand)}, stone chips ${q(r.aggregate)}${inp.ratio && inp.grade && r.notes.length > 2 ? `. Note: ${r.notes[0]}` : ""}`,
       };
     },
   }),

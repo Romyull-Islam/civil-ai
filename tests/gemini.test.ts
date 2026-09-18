@@ -58,3 +58,21 @@ describe("gemini agent round trip", () => {
     expect((await roundTrip([fcChunk({}), sigOnly])).thoughtSignature).toBe("LATE");
   });
 });
+
+describe("empty model replies", () => {
+  it("nudges once, then reports an error instead of ending silently", async () => {
+    let calls = 0;
+    const srv = http.createServer((req, res) => {
+      req.resume();
+      req.on("end", () => { calls++; res.writeHead(200, { "content-type": "text/event-stream" }); res.end(`data: ${JSON.stringify({ candidates: [{ content: { role: "model", parts: [{ text: "" }] }, finishReason: "STOP" }] })}\n\n`); });
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const { port } = srv.address() as AddressInfo;
+    const events: AgentEvent[] = [];
+    try {
+      await runAgent({ messages: [{ role: "user", parts: [{ type: "text", text: "how many bags of cement" }] }], provider: "gemini", model: "gemini-3.5-flash-lite", keys: { gemini: { apiKey: "test", baseUrl: `http://127.0.0.1:${port}` } }, emit: (e) => events.push(e) });
+    } finally { srv.close(); }
+    expect(calls).toBe(2);
+    expect(events.find((e) => e.type === "error")).toMatchObject({ message: expect.stringMatching(/empty reply/) });
+  });
+});
