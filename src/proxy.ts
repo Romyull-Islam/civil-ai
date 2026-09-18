@@ -5,7 +5,7 @@ export function proxy(req: NextRequest) {
   const mode = process.env.CIVIL_AI_MODE ?? (process.env.CIVIL_AI_DESKTOP ? "desktop" : "saas");
   if (mode !== "saas") return NextResponse.next();
   const { pathname } = req.nextUrl;
-  const open = ["/login", "/signup", "/verify", "/forgot", "/reset", "/pricing", "/help", "/api/auth", "/api/health", "/api/tools", "/api/site", "/api/tickets", "/api/checkout/return", "/api/checkout/ipn", "/api/webhooks", "/api/cron", "/favicon.ico"];
+  const open = ["/login", "/signup", "/verify", "/forgot", "/reset", "/pricing", "/help", "/terms", "/privacy", "/refund-policy", "/api/auth", "/api/health", "/api/tools", "/api/site", "/api/tickets", "/api/checkout/return", "/api/checkout/ipn", "/api/webhooks", "/api/cron", "/favicon.ico"];
   if (open.some((p) => pathname === p || pathname.startsWith(p + "/"))) return NextResponse.next();
   // CSRF: cookie-authenticated state-changing API calls must come from this site (gateway returns/IPNs/webhooks are in `open`).
   if (pathname.startsWith("/api/") && req.method !== "GET" && req.cookies.get("civil_session")?.value) {

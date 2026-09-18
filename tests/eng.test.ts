@@ -6,7 +6,7 @@ import { terzaghiFactors, bearingCapacity } from "@/lib/eng/soil";
 import { concreteMaterials, rebarKgPerM, brickMasonry } from "@/lib/eng/quantity";
 import { averageEndArea, prismoidal, gridCutFill } from "@/lib/eng/earthwork";
 import { designSteelBeam } from "@/lib/eng/steel";
-import { searchCodes } from "@/lib/eng/codes";
+import { searchCodes, COUNTRY_ORDER, countryOf } from "@/lib/eng/codes";
 import { evaluate } from "@/lib/eng/calc";
 import { runTool, selectToolsForText, TOOLS } from "@/lib/tools";
 import { recommendModel, type Hardware } from "@/lib/local";
@@ -154,6 +154,11 @@ describe("steel", () => {
 });
 
 describe("codes", () => {
+  it("country ordering and filters", () => {
+    expect(COUNTRY_ORDER[0]).toBe("Bangladesh"); expect(countryOf("BNBC 2020 Part 6")).toBe("Bangladesh"); expect(countryOf("NBC 2016 Part 3")).toBe("India"); expect(countryOf("NBC 105:2020 (Nepal)")).toBe("Nepal"); expect(countryOf("BCP-SP 2021 (Pakistan)")).toBe("Pakistan");
+    expect(searchCodes("seismic zone", { country: "Pakistan" })[0].id).toBe("bcp-seismic-zones");
+    expect(searchCodes("column size rules of thumb", { country: "Nepal" })[0].id).toBe("nbc205");
+  });
   it("finds BNBC seismic zone and GB stirrup clauses", () => {
     expect(searchCodes("bangladesh seismic zone dhaka")[0].id).toBe("bnbc-2.5");
     expect(searchCodes("china stirrup spacing beam")[0].id).toBe("gb50010-9.2");

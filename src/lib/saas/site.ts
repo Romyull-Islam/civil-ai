@@ -10,6 +10,11 @@ export interface SiteSettings {
   payment: { bkash: string; nagad: string; rocket: string; bank: string; qrImage: string; note: string; currency: string; conversion: number /* price × conversion = local amount */ };
   faq: string; // markdown
   cancellationPolicy: string; // markdown
+  companyName: string;
+  companyAddress: string;
+  terms: string; // markdown
+  privacy: string; // markdown
+  refundPolicy: string; // markdown
 }
 
 export const DEFAULT_SITE: SiteSettings = {
@@ -31,6 +36,32 @@ export const DEFAULT_SITE: SiteSettings = {
 
 **Are the results safe to build from?** No. They are preliminary. A licensed engineer must verify every design against the applicable local code.`,
   cancellationPolicy: "Prepaid plans end automatically at the expiry date; there is no auto-renewal and nothing to cancel. Refund requests within 7 days of payment are considered case by case — open a support ticket with your transaction ID.",
+  companyName: "",
+  companyAddress: "",
+  terms: `## Terms of Service
+
+1. **Service.** Civil AI provides engineering calculators, drawing generators, a building-code reference library and an AI assistant for civil, structural and construction professionals. Outputs are preliminary aids: every design must be checked and approved by a licensed engineer against the applicable local code before use in construction. We accept no liability for construction decisions.
+2. **Accounts.** You must provide a valid email address, keep your password confidential and be at least 18 years old. Staff of a Team plan are added by the team owner.
+3. **Plans and payment.** Paid plans are prepaid for the stated period (usually 30 days) and activate after payment confirmation. Prices are shown in Bangladeshi Taka (BDT) including applicable taxes unless stated otherwise; international card payments may be charged in USD. Plans do not renew automatically unless you enable a recurring card subscription.
+4. **Fair use.** Daily AI request limits apply per plan. Automated bulk use, resale of access or attempts to extract provider API keys are prohibited.
+5. **Data.** Conversations are stored on your device, not on our servers (see the Privacy Policy). Account, payment and usage records are kept for billing and legal purposes.
+6. **Changes and termination.** We may update features and prices with notice on the website. Either party may end the service; prepaid periods remain valid until expiry. Accounts breaching these terms may be suspended.
+7. **Governing law.** These terms are governed by the laws of Bangladesh.`,
+  privacy: `## Privacy Policy
+
+- **What we collect:** name, email address, password (hashed), plan and payment records (transaction IDs, amounts — never card numbers, which are handled by the payment gateway), support tickets, and daily usage counters.
+- **What we do not store:** your chat conversations. They stay in your browser or desktop app. Requests to the AI assistant are sent to the AI provider selected by your plan (for example Google, Groq, Alibaba Cloud, Anthropic) to generate the answer and are subject to that provider's API terms; we do not use them for training.
+- **Cookies:** one session cookie to keep you signed in; no advertising trackers.
+- **Emails:** verification codes, payment confirmations, renewal reminders and support replies only.
+- **Security:** encrypted connections (HTTPS), hashed passwords, encrypted API credentials, optional two-factor authentication.
+- **Your rights:** you can export or delete your chats at any time from the app; to delete your account and records, contact support.
+- **Contact:** see the Help page.`,
+  refundPolicy: `## Refund & Cancellation Policy
+
+- Plans are prepaid for a fixed period and **do not auto-renew** (unless you enabled a recurring card subscription, which you can cancel any time from the Account page or by contacting support; cancellation stops future charges and the current period runs to its end).
+- If a payment was made by mistake or the service could not be activated, request a refund within **7 days** of payment through a support ticket with your transaction ID. Approved refunds are returned to the original payment method (bKash/Nagad/Rocket/bank/card) within 7–10 working days.
+- Refunds are not given for unused days of a period already started, or for accounts suspended for breach of the Terms of Service.
+- Gateway fees deducted by the payment provider may be non-refundable.`,
 };
 
 export async function getSite(): Promise<SiteSettings> {

@@ -10,7 +10,7 @@ export default function PricingPage() {
     <div className="h-full overflow-y-auto">
       <div className="max-w-5xl mx-auto p-6 grid gap-6">
         <div className="text-center"><h1 className="text-2xl font-semibold">Plans</h1><p className="text-sm text-muted mt-1">Calculators, drawings and the code library are free for everyone. Plans set your daily AI assistant requests and which models answer.</p></div>
-        <div className="grid md:grid-cols-3 gap-4">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
           {plans.map((p) => (
             <div key={p.id} className={`card p-5 grid gap-3 ${s?.user?.plan === p.id ? "border-accent" : ""}`}>
               <div><div className="font-semibold text-lg">{p.name}</div><div className="text-2xl font-bold mt-1">{p.priceMonthly === 0 ? "Free" : `${p.currency === "USD" ? "$" : p.currency === "BDT" ? "৳" : p.currency + " "}${p.priceMonthly}`}<span className="text-sm text-muted font-normal">{p.priceMonthly ? (p.perSeat ? ` per user / month (min ${p.minSeats})` : " / month") : ""}</span></div></div>
@@ -19,6 +19,7 @@ export default function PricingPage() {
             </div>
           ))}
         </div>
+        <p className="text-xs text-muted text-center">Pay with Visa / Mastercard / Amex (local or international), bKash, Nagad, Rocket, Bangla QR or bank transfer. <Link className="text-accent2" href="/terms">Terms</Link> · <Link className="text-accent2" href="/privacy">Privacy</Link> · <Link className="text-accent2" href="/refund-policy">Refund policy</Link></p>
       </div>
     </div>
   );

@@ -196,9 +196,9 @@ export const TOOLS: ToolDef[] = [
   def({
     name: "search_code_clauses",
     category: "reference",
-    description: "Search the built-in building-code knowledge base (IS 456, IS 800, IS 875, IS 1893, ACI 318-19, ASCE 7, Eurocode 2/0/1, IS 6403, IRC 37, IS 1200) for clause summaries with clause numbers. Always cite the returned clause when answering code questions.",
-    schema: z.object({ query: z.string(), code: z.string().optional().describe("filter e.g. 'IS 456', 'ACI', 'EN 1992'"), limit: z.number().default(5) }),
-    run: (inp) => { const r = searchCodes(inp.query, { code: inp.code, limit: inp.limit }); return { result: r.map((c) => ({ id: c.id, code: c.code, clause: c.clause, topic: c.topic, text: c.text })), display: { kind: "table", title: "Code clauses", columns: ["Code", "Clause", "Topic", "Summary"], rows: r.map((c) => [c.code, c.clause, c.topic, c.text]) }, summary: r.length ? r.map((c) => `${c.code} cl. ${c.clause}: ${c.topic}`).join("; ") : "No matching clause in the local knowledge base." }; },
+    description: "Search the built-in building-code knowledge base — Bangladesh (BNBC 2020, RAJUK), India (IS 456/800/875/1893, NBC 2016), China (GB 50010/50009/50011/50007), USA (ACI 318-19, ASCE 7), Pakistan (BCP-SP 2021), Nepal (NBC 105/205), Europe (EN 1990/1991/1992) — for clause summaries with clause numbers. Filter by country when the user's location is known. Always cite the returned clause when answering code questions.",
+    schema: z.object({ query: z.string(), code: z.string().optional().describe("filter e.g. 'IS 456', 'ACI', 'EN 1992'"), country: z.enum(["Bangladesh", "India", "China", "USA", "Pakistan", "Nepal", "Europe"]).optional(), limit: z.number().default(5) }),
+    run: (inp) => { const r = searchCodes(inp.query, { code: inp.code, country: inp.country, limit: inp.limit }); return { result: r.map((c) => ({ id: c.id, code: c.code, clause: c.clause, topic: c.topic, text: c.text })), display: { kind: "table", title: "Code clauses", columns: ["Code", "Clause", "Topic", "Summary"], rows: r.map((c) => [c.code, c.clause, c.topic, c.text]) }, summary: r.length ? r.map((c) => `${c.code} cl. ${c.clause}: ${c.topic}`).join("; ") : "No matching clause in the local knowledge base." }; },
   }),
   def({
     name: "draw_beam_section",

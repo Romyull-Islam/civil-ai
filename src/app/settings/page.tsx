@@ -95,7 +95,7 @@ export default function SettingsPage() {
           <div className="grid sm:grid-cols-2 gap-3">
             <div><label className="label">Default design code</label>
               <select className="select mt-1" value={s.preferences.designCode ?? ""} onChange={(e) => update({ preferences: { ...s.preferences, designCode: e.target.value } })}>
-                {["IS 456 / IS 800", "ACI 318 / AISC 360", "Eurocode 2 / Eurocode 3", "BS 8110 / BS 5950", "AS 3600 / AS 4100"].map((c) => <option key={c}>{c}</option>)}
+                {["BNBC 2020 (Bangladesh)", "IS 456 / IS 800 (India)", "GB 50010 (China)", "ACI 318 / AISC 360 (USA)", "BCP-SP 2021 (Pakistan)", "NBC 105 / NBC 205 (Nepal)", "Eurocode 2 / Eurocode 3", "BS 8110 / BS 5950", "AS 3600 / AS 4100"].map((c) => <option key={c}>{c}</option>)}
               </select></div>
             <div><label className="label">Units</label>
               <select className="select mt-1" value={s.preferences.units ?? "SI"} onChange={(e) => update({ preferences: { ...s.preferences, units: e.target.value as "SI" | "imperial" } })}><option value="SI">SI (kN, m, MPa)</option><option value="imperial">Imperial (kip, ft, psi)</option></select></div>

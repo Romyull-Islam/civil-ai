@@ -4,6 +4,23 @@
  */
 export interface CodeClause { id: string; code: string; clause: string; topic: string; text: string; keywords: string[] }
 
+/** Display order of countries in the Code library (Bangladesh first, as requested). */
+export const COUNTRY_ORDER = ["Bangladesh", "India", "China", "USA", "Pakistan", "Nepal", "Europe", "International"] as const;
+export type Country = (typeof COUNTRY_ORDER)[number];
+
+export function countryOf(code: string): Country {
+  const c = code.toUpperCase();
+  if (c.startsWith("BNBC") || c.includes("RAJUK")) return "Bangladesh";
+  if (/^(IS |IRC|NBC 2016|SP:)/.test(c) || c.startsWith("IS ")) return "India";
+  if (c.startsWith("GB ")) return "China";
+  if (/^(ACI|ASCE|AISC|IBC|NDS)/.test(c)) return "USA";
+  if (/^(BCP|PAKISTAN)/.test(c)) return "Pakistan";
+  if (/^NBC \d{3}/.test(c) || c.includes("NEPAL")) return "Nepal";
+  if (/^(EN |EUROCODE|BS )/.test(c)) return "Europe";
+  return "International";
+}
+export const countryRank = (code: string) => COUNTRY_ORDER.indexOf(countryOf(code));
+
 export const CODE_CLAUSES: CodeClause[] = [
   // IS 456:2000
   { id: "is456-26.4", code: "IS 456:2000", clause: "26.4.2 / Table 16", topic: "Nominal cover", text: "Nominal cover for mild exposure 20 mm, moderate 30 mm, severe 45 mm, very severe 50 mm, extreme 75 mm. For footings minimum cover 50 mm. Cover may be reduced by 5 mm for slabs in mild exposure with bars ≤ 12 mm.", keywords: ["cover", "exposure", "footing", "durability"] },
@@ -68,6 +85,15 @@ export const CODE_CLAUSES: CodeClause[] = [
   { id: "gb55001-3", code: "GB 55001-2021 (supersedes GB 50009 factors)", clause: "3.1.13", topic: "Load combination factors", text: "Fundamental combination for ULS: γG = 1.3 for permanent loads (1.0 when favourable), γQ = 1.5 for variable loads (GB 50009-2012 used 1.2 and 1.4). Quasi-permanent/combination factors ψc 0.7 typical for live loads, 0.6 for wind.", keywords: ["china", "gb 55001", "load combination", "partial factor", "1.3", "1.5"] },
   { id: "gb50011-3", code: "GB 50011-2010 (2016)", clause: "3.2 / Table 3.2.2, 5.1.4", topic: "Seismic design basis", text: "Seismic fortification intensity 6, 7, 8, 9 with design basic acceleration 0.05g, 0.10g (0.15g), 0.20g (0.30g), 0.40g. Site classes I0, I1, II, III, IV with characteristic period Tg 0.20–0.90 s by design earthquake group. αmax (frequent earthquake): 0.04 (6), 0.08/0.12 (7), 0.16/0.24 (8), 0.32 (9). Frame concrete grade ≥ C30 for grade-1 seismic detailing; columns axial-load ratio limits 0.65–0.90 by grade.", keywords: ["china", "gb 50011", "seismic", "intensity", "acceleration", "site class"] },
   { id: "gb50007-5", code: "GB 50007-2011", clause: "5.2.4", topic: "Bearing capacity depth/width correction", text: "fa = fak + ηb·γ·(b − 3) + ηd·γm·(d − 0.5), where fak = characteristic bearing capacity from load tests/tables, b = foundation width (3 m ≤ b ≤ 6 m), d = embedment depth (m), ηb/ηd from Table 5.2.4 (e.g. silty clay ηb = 0.3, ηd = 1.6; dense sand ηb = 3.0, ηd = 4.4). Allowable settlement limits per Table 5.3.4 (e.g. 200 mm for framed buildings on medium soil).", keywords: ["china", "gb 50007", "bearing capacity", "foundation", "correction", "settlement"] },
+  // Pakistan — Building Code of Pakistan (BCP-SP 2007 / 2021 revision). Summaries; verify against the official text.
+  { id: "bcp-seismic-zones", code: "BCP-SP 2021 (Pakistan)", clause: "Ch. 2 / Fig. 2.1, Table 2.1", topic: "Seismic zones", text: "Five zones by peak ground acceleration: Zone 1 = 0.05–0.08g, Zone 2A = 0.08–0.16g, Zone 2B = 0.16–0.24g, Zone 3 = 0.24–0.32g, Zone 4 > 0.32g. Typical: Karachi 2B, Lahore 2A, Islamabad/Rawalpindi 2B, Peshawar 2B–3, Quetta 4, Muzaffarabad 4. Design follows UBC-97-type seismic coefficients (Ca, Cv by soil type SA–SE) with R factors per structural system.", keywords: ["pakistan", "bcp", "seismic zone", "karachi", "lahore", "islamabad", "quetta", "earthquake"] },
+  { id: "bcp-concrete", code: "BCP-SP 2021 (Pakistan)", clause: "Ch. 21 (Concrete) / Ch. 16 (Loads)", topic: "Concrete design and loads basis", text: "Concrete design adopts ACI 318 (strength design: φ 0.90 flexure, 0.75 shear, 0.65 tied columns; combinations 1.2D + 1.6L etc.). Loads follow ASCE 7/IBC values: residential 1.9 kN/m² (40 psf), offices 2.4 (50 psf), corridors 3.8 (80 psf), stairs 4.8 (100 psf). Seismic detailing (special moment frames) mandatory in Zones 3 and 4.", keywords: ["pakistan", "bcp", "concrete", "live load", "aci", "load combination"] },
+  { id: "bcp-energy", code: "BCP – Energy Provisions 2011 / Building Code of Pakistan (Fire Safety 2016)", clause: "General", topic: "Other parts", text: "Energy Provisions 2011 set envelope U-values and lighting power densities for commercial buildings; Fire Safety Provisions 2016 set egress widths (min 1.1 m corridors in assembly), fire separation and sprinkler requirements. Local building bye-laws (KDA/LDA/CDA) govern setbacks, FAR and plot coverage.", keywords: ["pakistan", "fire safety", "energy", "bye law", "setback"] },
+  // Nepal — Nepal National Building Code (NBC). Summaries; verify against the official text.
+  { id: "nbc105-2020", code: "NBC 105:2020 (Nepal)", clause: "4.1 / Table 4.1, 5.1", topic: "Seismic design basis", text: "Seismic zoning factor Z from the 2020 map: 0.25 (far west/east lowlands) to 0.40 (parts of the Terai/mid-hills); Kathmandu Valley Z = 0.35. Importance factor I = 1.0 (ordinary), 1.25 (public), 1.5 (critical). Soil types A–D; spectral shape factor Ch(T) per soil. Base shear V = Cd(T1)·W with ductility factor Rμ and overstrength Ωu by system (e.g. RC moment frame Rμ = 4, Ωu = 1.5 for ULS).", keywords: ["nepal", "nbc 105", "seismic", "zoning factor", "kathmandu", "base shear", "earthquake"] },
+  { id: "nbc205", code: "NBC 205:2012 (Nepal)", clause: "Mandatory Rules of Thumb – RC framed buildings", topic: "Minimum sizes without detailed design (≤ 3 storeys, spans ≤ 4.5 m)", text: "Columns ≥ 300 × 300 mm (M20, min 8 bars Ø16 for 3 storeys; 230 × 230 with 4 Ø16 permitted for single-storey small buildings), ties Ø8 @ 100 mm at ends / 150 mm middle; beams ≥ 230 × 325 mm (2 + 2 Ø16 min, stirrups Ø8 @ 100/150); slabs ≥ 125 mm with Ø8/Ø10 @ 150 mm; foundation depth ≥ 1.5 m on soft soil; bar lap 60 Ø. Cement grade M20 minimum, Fe415/500 steel.", keywords: ["nepal", "nbc 205", "rules of thumb", "column size", "beam size", "slab thickness", "minimum"] },
+  { id: "nbc102-103", code: "NBC 102:1994 / NBC 103:1994 (Nepal)", clause: "Loads", topic: "Unit weights and imposed loads", text: "Adopt IS 875 values: RC 25 kN/m³, brick masonry 19 kN/m³; imposed loads residential 2.0 kN/m², offices 2.5–4.0, corridors/stairs 3.0–5.0, shops 4.0, storage 5.0/m height. Wind (NBC 104): basic wind speed 47 m/s in the Terai to 55 m/s in high hills.", keywords: ["nepal", "nbc 102", "nbc 103", "live load", "dead load", "wind"] },
+  { id: "nbc-206-bye", code: "NBC 206:2015 / Nepal building bye-laws", clause: "Architectural rules", topic: "Room sizes, setbacks and height", text: "Habitable room ≥ 9.5 m² (width ≥ 2.4 m), kitchen ≥ 5 m², bath ≥ 1.8 m², WC ≥ 1.1 m², ceiling height ≥ 2.75 m (2.4 m in hill areas); Kathmandu Valley bye-laws: setback ≥ 1.5 m from road, ground coverage ≤ 70 % (≤ 50 % for large plots), FAR 1.75–3.5 by zone, right-of-way widening for roads < 8 m.", keywords: ["nepal", "room size", "setback", "far", "coverage", "bye law", "kathmandu"] },
   // Geotech / general
   { id: "is1904", code: "IS 1904:1986", clause: "7.2 / 7.3", topic: "Foundation depth", text: "Minimum depth of foundation 500 mm below ground (except on rock). Use Rankine formula Dmin = (q/γ)·[(1 − sin φ)/(1 + sin φ)]² for cohesionless soils. Foundation below frost line and zone of seasonal moisture change (expansive soils ≥ 1.5 m typical).", keywords: ["foundation depth", "minimum depth", "rankine"] },
   { id: "is6403", code: "IS 6403:1981", clause: "5.1", topic: "Bearing capacity", text: "qu = c·Nc·sc·dc·ic + q·Nq·sq·dq·iq + 0.5·γ·B·Nγ·sγ·dγ·iγ·W'. Shape factors: square sc = 1.3, sq = 1.2, sγ = 0.8; circular sγ = 0.6. Factor of safety 2.5–3 on net ultimate.", keywords: ["bearing capacity", "terzaghi", "shape factor", "factor of safety"] },
@@ -79,9 +105,9 @@ export const CODE_CLAUSES: CodeClause[] = [
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ");
 
-export function searchCodes(query: string, opts: { code?: string; limit?: number } = {}): (CodeClause & { score: number })[] {
+export function searchCodes(query: string, opts: { code?: string; country?: string; limit?: number } = {}): (CodeClause & { score: number })[] {
   const terms = norm(query).split(/\s+/).filter((t) => t.length > 1);
-  const results = CODE_CLAUSES.filter((c) => !opts.code || c.code.toLowerCase().includes(opts.code.toLowerCase())).map((c) => {
+  const results = CODE_CLAUSES.filter((c) => (!opts.code || c.code.toLowerCase().includes(opts.code.toLowerCase())) && (!opts.country || countryOf(c.code).toLowerCase() === opts.country.toLowerCase())).map((c) => {
     const hay = norm(`${c.code} ${c.clause} ${c.topic} ${c.text} ${c.keywords.join(" ")}`);
     let score = 0;
     for (const t of terms) {
@@ -90,6 +116,6 @@ export function searchCodes(query: string, opts: { code?: string; limit?: number
       if (hay.includes(t)) score += 1;
     }
     return { ...c, score };
-  }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score);
+  }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score || countryRank(a.code) - countryRank(b.code));
   return results.slice(0, opts.limit ?? 5);
 }

@@ -233,7 +233,14 @@ function SiteTab() {
       <div className="card p-4 grid gap-3 text-sm">
         <h2 className="font-medium">Help page content (Markdown)</h2>
         <div><label className="label">FAQ</label><textarea className="textarea mt-1 min-h-48 font-mono text-xs" value={site.faq} onChange={(e) => set({ faq: e.target.value })} /></div>
-        <div><label className="label">Cancellation & refund policy</label><textarea className="textarea mt-1 min-h-20 font-mono text-xs" value={site.cancellationPolicy} onChange={(e) => set({ cancellationPolicy: e.target.value })} /></div>
+        <div><label className="label">Cancellation & refund policy (short, Help page)</label><textarea className="textarea mt-1 min-h-20 font-mono text-xs" value={site.cancellationPolicy} onChange={(e) => set({ cancellationPolicy: e.target.value })} /></div>
+      </div>
+      <div className="card p-4 grid gap-3 text-sm">
+        <h2 className="font-medium">Legal pages (required by payment gateways for merchant approval)</h2>
+        <div className="grid sm:grid-cols-2 gap-2"><div><label className="label">Company / legal name</label><input className="input mt-1" value={site.companyName} onChange={(e) => set({ companyName: e.target.value })} placeholder="XYZ Engineering Ltd. (trade licence holder)" /></div><div><label className="label">Registered address</label><input className="input mt-1" value={site.companyAddress} onChange={(e) => set({ companyAddress: e.target.value })} /></div></div>
+        <div><label className="label">Terms of Service — /terms</label><textarea className="textarea mt-1 min-h-40 font-mono text-xs" value={site.terms} onChange={(e) => set({ terms: e.target.value })} /></div>
+        <div><label className="label">Privacy Policy — /privacy</label><textarea className="textarea mt-1 min-h-40 font-mono text-xs" value={site.privacy} onChange={(e) => set({ privacy: e.target.value })} /></div>
+        <div><label className="label">Refund & Cancellation Policy — /refund-policy</label><textarea className="textarea mt-1 min-h-32 font-mono text-xs" value={site.refundPolicy} onChange={(e) => set({ refundPolicy: e.target.value })} /></div>
       </div>
       {err && <div className="text-xs text-err">{err}</div>}
       <div className="flex gap-2 items-center"><button className="btn btn-primary" onClick={save}><Save size={14} /> Save settings</button>{saved && <span className="text-xs text-ok">saved</span>}</div>
@@ -242,7 +249,7 @@ function SiteTab() {
 }
 
 function GatewaysTab() {
-  interface GW { id: string; label: string; methods: string; docs: string; fields: { key: string; label: string; secret?: boolean; placeholder?: string }[]; enabled: boolean; sandbox: boolean; values: Record<string, string> }
+  interface GW { id: string; label: string; methods: string; docs: string; fields: { key: string; label: string; secret?: boolean; placeholder?: string }[]; enabled: boolean; sandbox: boolean; fromEnv?: boolean; values: Record<string, string> }
   const [list, setList] = useState<GW[]>([]); const [draft, setDraft] = useState<Record<string, Partial<GW>>>({}); const [msg, setMsg] = useState<string | null>(null);
   const load = () => fetch("/api/admin/gateways").then((r) => r.json()).then((j) => setList(j.gateways ?? []));
   useEffect(() => { load(); }, []);
@@ -252,7 +259,7 @@ function GatewaysTab() {
       <p className="text-xs text-muted">Online payment gateways activate plans instantly and enable automatic renewal (Stripe) — no manual approval. Credentials are encrypted. Use <b>sandbox</b> to test with the provider&apos;s test credentials, then switch to live once your merchant account is approved. Aggregators (SSLCommerz, aamarPay, shurjoPay) show bKash, Nagad, Rocket, Upay, cards and banks on their page; a direct bKash merchant API is also supported. Manual bKash/Nagad/Rocket numbers (Site settings) remain available as fallback.</p>
       {list.map((g) => { const d = draft[g.id] ?? {}; const vals = { ...g.values, ...(d.values ?? {}) }; return (
         <div key={g.id} className="card p-4 grid gap-2 text-sm">
-          <div className="flex flex-wrap items-center gap-3"><span className="font-medium">{g.label}</span><span className="text-xs text-muted">{g.methods}</span><a className="text-xs text-accent2" href={g.docs} target="_blank" rel="noreferrer">docs</a>
+          <div className="flex flex-wrap items-center gap-3"><span className="font-medium">{g.label}</span>{g.id === "sslcommerz" && <span className="badge text-ok border-ok/40">recommended for Bangladesh — cards + bKash + Nagad + Rocket + QR</span>}{g.fromEnv && <span className="badge">configured from environment</span>}<span className="text-xs text-muted">{g.methods}</span><a className="text-xs text-accent2" href={g.docs} target="_blank" rel="noreferrer">docs</a>
             <label className="ml-auto text-xs flex items-center gap-1"><input type="checkbox" checked={d.enabled ?? g.enabled} onChange={(e) => setDraft((x) => ({ ...x, [g.id]: { ...d, enabled: e.target.checked } }))} /> enabled</label>
             <label className="text-xs flex items-center gap-1"><input type="checkbox" checked={d.sandbox ?? g.sandbox} onChange={(e) => setDraft((x) => ({ ...x, [g.id]: { ...d, sandbox: e.target.checked } }))} /> sandbox / test mode</label></div>
           <div className="grid sm:grid-cols-2 gap-2">{g.fields.map((f) => <div key={f.key}><label className="label">{f.label}</label><input className="input mt-1" type={f.secret ? "password" : "text"} placeholder={f.placeholder} value={vals[f.key] ?? ""} onChange={(e) => setDraft((x) => ({ ...x, [g.id]: { ...d, values: { ...(d.values ?? {}), [f.key]: e.target.value } } }))} autoComplete="off" /></div>)}</div>

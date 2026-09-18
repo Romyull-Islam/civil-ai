@@ -125,6 +125,28 @@ Admin → *Payment gateways*: enable, choose sandbox/live, paste credentials. Cu
 | SSLCommerz | bKash, Nagad, Rocket, Upay, Bangla QR, cards, banks | ≈ 2.5–3.5 % (+ possible setup fee) | sandbox tested ✓ (demo store `testbox`) |
 | Stripe | international cards, Apple/Google Pay | 2.9 % + $0.30 | not available to Bangladeshi entities directly; use a Stripe Atlas/foreign entity; supports **recurring monthly auto-renewal** via webhook |
 
+### Using the partner company's existing SSLCommerz account (recommended)
+
+They already have a live SSLCommerz merchant account, so nothing new has to be applied for. Steps:
+
+1. In the SSLCommerz merchant panel (merchant.sslcommerz.com) → **My Stores**: either use the existing store or create an additional store for Civil AI (recommended, so payouts and reports stay separate). Copy the **Store ID** and **Store Password**.
+2. In the same panel, whitelist the new site: add `https://YOUR-DOMAIN` as the store's website/URL and set the **IPN URL** to `https://YOUR-DOMAIN/api/checkout/ipn/sslcommerz` (Settings → IPN).
+3. Enter the credentials in **Admin → Payment gateways → SSLCommerz**, untick *sandbox*, tick *enabled*, Save — or set `GATEWAY_SSLCOMMERZ_STORE_ID`, `GATEWAY_SSLCOMMERZ_STORE_PASSWD` and `GATEWAY_SSLCOMMERZ_LIVE=1` in the hosting environment.
+4. Make a ৳10 test purchase (a Pro plan with a temporary ৳10 price or a test plan), confirm it appears as *approved* in Admin → Payments and the plan activated, then restore the price.
+5. Fees are charged by SSLCommerz per the partner's existing agreement; payouts go to the partner company's settlement bank account. Agree the revenue split with them separately.
+
+The three legal pages (`/terms`, `/privacy`, `/refund-policy`) must be reachable on the new domain — SSLCommerz checks them when adding a site.
+
+### Debit/credit cards in Bangladesh (with the partner company's trade licence)
+
+Local and international Visa / Mastercard / Amex are accepted through any of the three Bangladeshi aggregators — no separate card gateway is needed. Recommended setup once the merged company's trade licence is available:
+
+1. **SSLCommerz** as the primary gateway (largest, cards + bKash + Nagad + Rocket + Upay + Bangla QR + internet banking on one page; card fee ≈ 2.5–3 %). Apply at sslcommerz.com → Merchant registration.
+2. Optional **bKash merchant API** for the lowest bKash fee (≈ 1.85 %).
+3. **Stripe** only for customers outside Bangladesh (requires a foreign entity).
+
+Merchant onboarding checklist (asked by all gateways): trade licence, TIN certificate, bank account in the company name, NID of the signatory, company address and phone, and a **live website with Terms of Service, Privacy Policy, Refund policy and contact pages** — these three pages are built in (`/terms`, `/privacy`, `/refund-policy`, editable in Admin → *Site & payment settings* → Legal pages; put the company name and address there). Approval typically takes 3–10 working days; use sandbox mode until live credentials arrive.
+
 Cheapest path at ৳300/৳1000 prices: keep manual transfers (0 %) and add the bKash merchant API (≈1.85 %) once volume justifies it; aggregators only if you need cards. Your dominant cost is AI usage, not fees — that is why Pro is 100 requests/day and Max 300/day by default (raise in Admin → Plans when margins allow).
 
 Return/IPN/webhook URLs the gateways need (replace the domain): `https://YOUR-DOMAIN/api/checkout/return/<gateway>` (set automatically per checkout), `https://YOUR-DOMAIN/api/checkout/ipn/sslcommerz`, `https://YOUR-DOMAIN/api/webhooks/stripe`.

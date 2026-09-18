@@ -6,9 +6,9 @@ Runs as a web app (Vercel-ready) **and** as a Windows/Linux/macOS desktop app (E
 
 ![Drawings page](docs/screenshot.png)
 
-| Assistant | Calculators | Code library | Auto floor plan | Building planner (2 storeys) |
-|---|---|---|---|---|
-| ![](docs/screenshot-assistant.png) | ![](docs/screenshot-calculators.png) | ![](docs/screenshot-codes.png) | ![](docs/screenshot-plan.png) | ![](docs/screenshot-building.png) |
+| Assistant | Calculators | Code library | Auto floor plan | Building planner | Checkout (SSLCommerz) |
+|---|---|---|---|---|---|
+| ![](docs/screenshot-assistant.png) | ![](docs/screenshot-calculators.png) | ![](docs/screenshot-codes.png) | ![](docs/screenshot-plan.png) | ![](docs/screenshot-building.png) | ![](docs/screenshot-checkout.png) |
 
 ## Features
 

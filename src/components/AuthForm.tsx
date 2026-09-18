@@ -31,6 +31,7 @@ export function AuthForm({ kind }: { kind: "login" | "signup" }) {
         {err && <div className="text-sm text-err">{err}</div>}
         <button className="btn btn-primary justify-center" disabled={busy}>{busy ? "…" : kind === "login" ? "Sign in" : "Sign up"}</button>
         <div className="text-xs text-muted text-center">{kind === "login" ? <>No account? <Link className="text-accent2" href="/signup">Sign up</Link> · <Link className="text-accent2" href="/forgot">Forgot password?</Link></> : <>Have an account? <Link className="text-accent2" href="/login">Sign in</Link></>} · <Link className="text-accent2" href="/pricing">Plans</Link></div>
+        <div className="text-[11px] text-muted text-center">By continuing you agree to the <Link className="text-accent2" href="/terms">Terms</Link>, <Link className="text-accent2" href="/privacy">Privacy</Link> and <Link className="text-accent2" href="/refund-policy">Refund</Link> policies.</div>
       </form>
     </div>
   );
