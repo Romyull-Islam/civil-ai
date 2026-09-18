@@ -145,7 +145,7 @@ export function gpuBuildUsable(hw: Hardware): boolean {
   const exe = serverExe(hw);
   if (!exe) return false;
   try {
-    const out = execFileSync(exe, ["--list-devices"], { timeout: 20000, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LD_LIBRARY_PATH: path.dirname(exe) } }).toString();
+    const out = execFileSync(/* turbopackIgnore: true */ exe, ["--list-devices"], { timeout: 20000, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LD_LIBRARY_PATH: path.dirname(exe) } }).toString();
     return /NVIDIA|GeForce|RTX|Quadro|AMD|Radeon/i.test(out);
   } catch { return false; }
 }
@@ -307,7 +307,7 @@ export async function startServer(model?: ModelSpec): Promise<void> {
     // Speed on CPU: skip hidden "thinking" tokens (the app's tools do the reasoning) and reuse the KV cache across turns that share the system prompt + tool schemas.
     "--reasoning-budget", "0", "--cache-reuse", "256"];
   lastLog = [];
-  proc = spawn(exe, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LD_LIBRARY_PATH: path.dirname(exe) } });
+  proc = spawn(/* turbopackIgnore: true */ exe, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LD_LIBRARY_PATH: path.dirname(exe) } });
   const log = (d: Buffer) => { lastLog.push(d.toString()); if (lastLog.length > 50) lastLog.shift(); };
   proc.stdout?.on("data", log); proc.stderr?.on("data", log);
   proc.on("exit", () => { running = null; proc = null; });

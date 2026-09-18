@@ -169,7 +169,7 @@ Return/IPN/webhook URLs the gateways need (replace the domain): `https://YOUR-DO
 
 ## Deploy on Render (alternative to Vercel, also free)
 
-`render.yaml` is included: Render → New → Blueprint → pick the repo → it creates the free web service **and** a free Postgres database and wires `DATABASE_URL`, secrets and cron-less scheduling (the in-process daily scheduler runs on Render). Fill `ADMIN_EMAILS`, `NEXT_PUBLIC_APP_URL`, SMTP and provider keys in the dashboard. Free web services sleep after 15 min idle (first request ~30 s). A `Dockerfile` is included for any VPS.
+`render.yaml` is included: Render → New → Blueprint → pick the repo → it creates the free web service (database on Aiven/Neon via `DATABASE_URL`), generates the secrets, and the in-process daily scheduler handles renewals. The build command uses `npm ci --include=dev` because Render sets `NODE_ENV=production`, which would otherwise skip the packages Next.js needs to build. Fill `ADMIN_EMAILS`, `NEXT_PUBLIC_APP_URL`, SMTP and provider keys in the dashboard. Free web services sleep after 15 min idle (first request ~30 s). A `Dockerfile` is included for any VPS.
 
 ## Security notes
 - Passwords: scrypt; sessions: random 256-bit tokens, HttpOnly cookie (30 days) or Bearer token (desktop).

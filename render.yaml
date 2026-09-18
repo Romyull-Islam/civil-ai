@@ -4,7 +4,7 @@ services:
     name: civilmate
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build && cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/
+    buildCommand: npm ci --include=dev && npm run build && cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/
     startCommand: node .next/standalone/server.js
     healthCheckPath: /api/health
     envVars:
