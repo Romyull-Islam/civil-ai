@@ -8,7 +8,8 @@ export const ROLES: Role[] = ["superadmin", "admin", "support", "user"];
 export const isStaff = (r: Role) => r !== "user";
 
 export interface User { id: string; email: string; name: string; passwordHash: string; role: Role; plan: string; planExpires: number | null; createdAt: number; disabled: number; emailVerified: number; verifyCode: string | null; verifyExpires: number | null }
-export interface Payment { id: string; userId: string; email: string; plan: string; method: string; amount: number; currency: string; txnId: string; sender: string; status: "pending" | "approved" | "rejected"; note: string; createdAt: number; reviewedAt: number | null }
+export interface Payment { id: string; userId: string; email: string; plan: string; method: string; amount: number; currency: string; txnId: string; sender: string; status: "pending" | "approved" | "rejected"; note: string; createdAt: number; reviewedAt: number | null; seats: number }
+export interface Team { id: string; name: string; ownerId: string; plan: string; seats: number; expires: number | null; createdAt: number }
 export interface Ticket { id: string; userId: string | null; email: string; subject: string; message: string; status: "open" | "answered" | "closed"; reply: string; createdAt: number; updatedAt: number }
 export interface Session { token: string; userId: string; expires: number }
 export interface UsageRow { day: string; requests: number; inputTokens: number; outputTokens: number }
@@ -40,6 +41,16 @@ export interface DB {
   createTicket(t: Ticket): Promise<void>;
   listTickets(opts: { userId?: string; status?: string; limit?: number }): Promise<Ticket[]>;
   updateTicket(id: string, patch: Partial<Pick<Ticket, "status" | "reply" | "updatedAt">>): Promise<void>;
+  createTeam(t: Team): Promise<void>;
+  updateTeam(id: string, patch: Partial<Pick<Team, "name" | "plan" | "seats" | "expires" | "ownerId">>): Promise<void>;
+  getTeam(id: string): Promise<Team | null>;
+  getTeamByOwner(ownerId: string): Promise<Team | null>;
+  getTeamForUser(userId: string): Promise<Team | null>;
+  listTeams(): Promise<Team[]>;
+  addTeamMember(teamId: string, userId: string): Promise<void>;
+  removeTeamMember(teamId: string, userId: string): Promise<void>;
+  listTeamMembers(teamId: string): Promise<User[]>;
+  deleteTeam(id: string): Promise<void>;
 }
 
 const SCHEMA = (big: string) => [
@@ -48,6 +59,8 @@ const SCHEMA = (big: string) => [
   `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS usage (user_id TEXT NOT NULL, day TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, input_tokens ${big} NOT NULL DEFAULT 0, output_tokens ${big} NOT NULL DEFAULT 0, PRIMARY KEY (user_id, day))`,
   `CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, email TEXT NOT NULL, plan TEXT NOT NULL, method TEXT NOT NULL, amount REAL NOT NULL, currency TEXT NOT NULL, txn_id TEXT NOT NULL, sender TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', note TEXT NOT NULL DEFAULT '', created_at ${big} NOT NULL, reviewed_at ${big})`,
+  `CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL, plan TEXT NOT NULL, seats INTEGER NOT NULL DEFAULT 3, expires ${big}, created_at ${big} NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS team_members (team_id TEXT NOT NULL, user_id TEXT NOT NULL, added_at ${big} NOT NULL, PRIMARY KEY (team_id, user_id))`,
   `CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, user_id TEXT, email TEXT NOT NULL, subject TEXT NOT NULL, message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', reply TEXT NOT NULL DEFAULT '', created_at ${big} NOT NULL, updated_at ${big} NOT NULL)`,
 ];
 /** Additive migrations (ignored when the column already exists). */
@@ -55,11 +68,13 @@ const MIGRATIONS = (big: string) => [
   `ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE users ADD COLUMN verify_code TEXT`,
   `ALTER TABLE users ADD COLUMN verify_expires ${big}`,
+  `ALTER TABLE payments ADD COLUMN seats INTEGER NOT NULL DEFAULT 1`,
 ];
 
 type Row = Record<string, unknown>;
 const toUser = (r: Row): User => ({ id: String(r.id), email: String(r.email), name: String(r.name ?? ""), passwordHash: String(r.password_hash), role: (ROLES as string[]).includes(String(r.role)) ? (r.role as Role) : "user", plan: String(r.plan), planExpires: r.plan_expires == null ? null : Number(r.plan_expires), createdAt: Number(r.created_at), disabled: Number(r.disabled ?? 0), emailVerified: Number(r.email_verified ?? 0), verifyCode: r.verify_code == null ? null : String(r.verify_code), verifyExpires: r.verify_expires == null ? null : Number(r.verify_expires) });
-const toPayment = (r: Row): Payment => ({ id: String(r.id), userId: String(r.user_id), email: String(r.email), plan: String(r.plan), method: String(r.method), amount: Number(r.amount), currency: String(r.currency), txnId: String(r.txn_id), sender: String(r.sender ?? ""), status: r.status as Payment["status"], note: String(r.note ?? ""), createdAt: Number(r.created_at), reviewedAt: r.reviewed_at == null ? null : Number(r.reviewed_at) });
+const toPayment = (r: Row): Payment => ({ id: String(r.id), userId: String(r.user_id), email: String(r.email), plan: String(r.plan), method: String(r.method), amount: Number(r.amount), currency: String(r.currency), txnId: String(r.txn_id), sender: String(r.sender ?? ""), status: r.status as Payment["status"], note: String(r.note ?? ""), createdAt: Number(r.created_at), reviewedAt: r.reviewed_at == null ? null : Number(r.reviewed_at), seats: Number(r.seats ?? 1) });
+const toTeam = (r: Row): Team => ({ id: String(r.id), name: String(r.name), ownerId: String(r.owner_id), plan: String(r.plan), seats: Number(r.seats), expires: r.expires == null ? null : Number(r.expires), createdAt: Number(r.created_at) });
 const toTicket = (r: Row): Ticket => ({ id: String(r.id), userId: r.user_id == null ? null : String(r.user_id), email: String(r.email), subject: String(r.subject), message: String(r.message), status: r.status as Ticket["status"], reply: String(r.reply ?? ""), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) });
 const toUsage = (r: Row | undefined): UsageRow => ({ day: String(r?.day ?? ""), requests: Number(r?.requests ?? 0), inputTokens: Number(r?.input_tokens ?? 0), outputTokens: Number(r?.output_tokens ?? 0) });
 const dayCutoff = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
@@ -92,13 +107,23 @@ function makeDB(run: (sql: string, params?: unknown[]) => Promise<void>, all: (s
     async getUsage(userId, day) { return toUsage(await one("SELECT * FROM usage WHERE user_id = ? AND day = ?", [userId, day])); },
     async usageByDay(days) { return (await all("SELECT day, SUM(requests) AS requests, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens FROM usage WHERE day >= ? GROUP BY day ORDER BY day DESC", [dayCutoff(days)])).map(toUsage); },
     async setVerification(id, code, expires, verified) { await run("UPDATE users SET verify_code = ?, verify_expires = ?" + (verified === undefined ? "" : ", email_verified = ?") + " WHERE id = ?", verified === undefined ? [code, expires, id] : [code, expires, verified, id]); },
-    async createPayment(p) { await run("INSERT INTO payments (id, user_id, email, plan, method, amount, currency, txn_id, sender, status, note, created_at, reviewed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", [p.id, p.userId, p.email, p.plan, p.method, p.amount, p.currency, p.txnId, p.sender, p.status, p.note, p.createdAt, p.reviewedAt]); },
+    async createPayment(p) { await run("INSERT INTO payments (id, user_id, email, plan, method, amount, currency, txn_id, sender, status, note, created_at, reviewed_at, seats) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [p.id, p.userId, p.email, p.plan, p.method, p.amount, p.currency, p.txnId, p.sender, p.status, p.note, p.createdAt, p.reviewedAt, p.seats ?? 1]); },
     async listPayments({ userId, status, limit = 200 }) { const w: string[] = []; const v: unknown[] = []; if (userId) { w.push("user_id = ?"); v.push(userId); } if (status) { w.push("status = ?"); v.push(status); } return (await all(`SELECT * FROM payments${w.length ? " WHERE " + w.join(" AND ") : ""} ORDER BY created_at DESC LIMIT ?`, [...v, limit])).map(toPayment); },
     async updatePayment(id, patch) { const cols: string[] = []; const vals: unknown[] = []; const map: Record<string, string> = { status: "status", note: "note", reviewedAt: "reviewed_at" }; for (const [k, val] of Object.entries(patch)) if (k in map && val !== undefined) { cols.push(`${map[k]} = ?`); vals.push(val); } if (cols.length) await run(`UPDATE payments SET ${cols.join(", ")} WHERE id = ?`, [...vals, id]); },
     async getPayment(id) { const r = await one("SELECT * FROM payments WHERE id = ?", [id]); return r ? toPayment(r) : null; },
     async createTicket(t) { await run("INSERT INTO tickets (id, user_id, email, subject, message, status, reply, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)", [t.id, t.userId, t.email, t.subject, t.message, t.status, t.reply, t.createdAt, t.updatedAt]); },
     async listTickets({ userId, status, limit = 200 }) { const w: string[] = []; const v: unknown[] = []; if (userId) { w.push("user_id = ?"); v.push(userId); } if (status) { w.push("status = ?"); v.push(status); } return (await all(`SELECT * FROM tickets${w.length ? " WHERE " + w.join(" AND ") : ""} ORDER BY created_at DESC LIMIT ?`, [...v, limit])).map(toTicket); },
     async updateTicket(id, patch) { const cols: string[] = []; const vals: unknown[] = []; const map: Record<string, string> = { status: "status", reply: "reply", updatedAt: "updated_at" }; for (const [k, val] of Object.entries(patch)) if (k in map && val !== undefined) { cols.push(`${map[k]} = ?`); vals.push(val); } if (cols.length) await run(`UPDATE tickets SET ${cols.join(", ")} WHERE id = ?`, [...vals, id]); },
+    async createTeam(t) { await run("INSERT INTO teams (id, name, owner_id, plan, seats, expires, created_at) VALUES (?,?,?,?,?,?,?)", [t.id, t.name, t.ownerId, t.plan, t.seats, t.expires, t.createdAt]); await run("INSERT INTO team_members (team_id, user_id, added_at) VALUES (?,?,?)", [t.id, t.ownerId, t.createdAt]); },
+    async updateTeam(id, patch) { const cols: string[] = []; const vals: unknown[] = []; const map: Record<string, string> = { name: "name", plan: "plan", seats: "seats", expires: "expires", ownerId: "owner_id" }; for (const [k, v] of Object.entries(patch)) if (k in map && v !== undefined) { cols.push(`${map[k]} = ?`); vals.push(v); } if (cols.length) await run(`UPDATE teams SET ${cols.join(", ")} WHERE id = ?`, [...vals, id]); },
+    async getTeam(id) { const r = await one("SELECT * FROM teams WHERE id = ?", [id]); return r ? toTeam(r) : null; },
+    async getTeamByOwner(ownerId) { const r = await one("SELECT * FROM teams WHERE owner_id = ?", [ownerId]); return r ? toTeam(r) : null; },
+    async getTeamForUser(userId) { const r = await one("SELECT t.* FROM teams t JOIN team_members m ON m.team_id = t.id WHERE m.user_id = ? ORDER BY t.expires DESC LIMIT 1", [userId]); return r ? toTeam(r) : null; },
+    async listTeams() { return (await all("SELECT * FROM teams ORDER BY created_at DESC LIMIT 500")).map(toTeam); },
+    async addTeamMember(teamId, userId) { await run("DELETE FROM team_members WHERE team_id = ? AND user_id = ?", [teamId, userId]); await run("INSERT INTO team_members (team_id, user_id, added_at) VALUES (?,?,?)", [teamId, userId, Date.now()]); },
+    async removeTeamMember(teamId, userId) { await run("DELETE FROM team_members WHERE team_id = ? AND user_id = ?", [teamId, userId]); },
+    async listTeamMembers(teamId) { return (await all("SELECT u.* FROM users u JOIN team_members m ON m.user_id = u.id WHERE m.team_id = ? ORDER BY m.added_at", [teamId])).map(toUser); },
+    async deleteTeam(id) { await run("DELETE FROM team_members WHERE team_id = ?", [id]); await run("DELETE FROM teams WHERE id = ?", [id]); },
     async usageByUser(days, limit = 50) { return (await all("SELECT u.user_id, us.email, SUM(u.requests) AS requests, SUM(u.input_tokens) AS input_tokens, SUM(u.output_tokens) AS output_tokens FROM usage u JOIN users us ON us.id = u.user_id WHERE u.day >= ? GROUP BY u.user_id, us.email ORDER BY requests DESC LIMIT ?", [dayCutoff(days), limit])).map((r) => ({ ...toUsage(r), userId: String(r.user_id), email: String(r.email) })); },
   };
 }

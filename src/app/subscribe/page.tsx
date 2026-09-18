@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { CreditCard, Check } from "lucide-react";
 import { useSession } from "@/lib/client/session";
 
-interface SiteInfo { gateways: { id: string; label: string; methods: string; sandbox: boolean }[]; site: { payment: { bkash: string; nagad: string; rocket: string; bank: string; qrImage: string; note: string; currency: string; conversion: number }; supportEmail: string; whatsapp: string }; plans: { id: string; name: string; priceMonthly: number; currency: string; periodDays: number; features: string[] }[] }
+interface SiteInfo { gateways: { id: string; label: string; methods: string; sandbox: boolean }[]; site: { payment: { bkash: string; nagad: string; rocket: string; bank: string; qrImage: string; note: string; currency: string; conversion: number }; supportEmail: string; whatsapp: string }; plans: { id: string; name: string; priceMonthly: number; currency: string; periodDays: number; features: string[]; perSeat?: boolean; minSeats?: number }[] }
 
 // eslint-disable-next-line @next/next/no-img-element
 const QrImage = ({ src, className }: { src: string; className: string }) => <img src={src} alt="Bangla QR" className={className} />;
@@ -13,26 +13,29 @@ export default function SubscribePage() {
   const [info, setInfo] = useState<SiteInfo | null>(null);
   const [planId, setPlanId] = useState(""); const [method, setMethod] = useState("bkash"); const [txn, setTxn] = useState(""); const [sender, setSender] = useState("");
   const [done, setDone] = useState<string | null>(null); const [err, setErr] = useState<string | null>(null);
+  const [seats, setSeats] = useState(3);
   const [paying, setPaying] = useState<string | null>(null);
-  const payOnline = async (gateway: string) => { setErr(null); setPaying(gateway); const r = await fetch("/api/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: planId, gateway }) }); const j = await r.json(); setPaying(null); if (!r.ok) { setErr(j.error); return; } window.location.assign(j.url); };
+  const payOnline = async (gateway: string) => { setErr(null); setPaying(gateway); const r = await fetch("/api/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: planId, gateway, seats }) }); const j = await r.json(); setPaying(null); if (!r.ok) { setErr(j.error); return; } window.location.assign(j.url); };
   const [mine, setMine] = useState<{ id: string; plan: string; method: string; txnId: string; status: string; createdAt: number; note: string }[]>([]);
   useEffect(() => { fetch("/api/site").then((r) => r.json()).then((j: SiteInfo) => { setInfo(j); const q = new URLSearchParams(window.location.search).get("plan"); setPlanId(q && j.plans.some((p) => p.id === q) ? q : j.plans.find((p) => p.priceMonthly > 0)?.id ?? ""); }); fetch("/api/payments").then((r) => r.json()).then((j) => setMine(j.payments ?? [])).catch(() => {}); }, []);
   if (!info) return <div className="p-6 text-sm text-muted">Loading…</div>;
   if (!s?.user) return <div className="p-6 text-sm">Please <a className="text-accent2" href="/login?next=/subscribe">sign in</a> to subscribe.</div>;
   const plan = info.plans.find((p) => p.id === planId);
   const pay = info.site.payment;
-  const local = plan ? Math.round(plan.priceMonthly * (pay.currency === plan.currency ? 1 : pay.conversion)) : 0;
+  const nSeats = plan?.perSeat ? Math.max(plan.minSeats ?? 1, seats) : 1;
+  const local = plan ? Math.round(plan.priceMonthly * (pay.currency === plan.currency ? 1 : pay.conversion)) * nSeats : 0;
   const methods = [["bkash", "bKash", pay.bkash], ["nagad", "Nagad", pay.nagad], ["rocket", "Rocket", pay.rocket], ["qr", "Bangla QR", pay.qrImage ? "scan the QR" : ""], ["bank", "Bank transfer", pay.bank]].filter(([, , v]) => v) as [string, string, string][];
   const submit = async () => {
     setErr(null);
-    const r = await fetch("/api/payments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: planId, method, amount: local, currency: pay.currency, txnId: txn, sender }) });
+    const r = await fetch("/api/payments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: planId, method, amount: local, currency: pay.currency, txnId: txn, sender, seats: nSeats }) });
     const j = await r.json(); if (!r.ok) { setErr(j.error); return; }
     setDone(j.payment.id); setMine((m) => [j.payment, ...m]);
   };
   return (
     <div className="h-full overflow-y-auto"><div className="max-w-3xl mx-auto p-6 grid gap-4">
       <div className="flex items-center gap-2"><CreditCard className="text-accent" /><h1 className="text-lg font-semibold">Subscribe</h1></div>
-      <div className="grid sm:grid-cols-3 gap-2">{info.plans.filter((p) => p.priceMonthly > 0).map((p) => <button key={p.id} className={`card p-3 text-left ${planId === p.id ? "border-accent" : ""}`} onClick={() => setPlanId(p.id)}><div className="font-medium">{p.name}</div><div className="text-sm text-muted">{p.currency === "BDT" ? "৳" : p.currency + " "}{p.priceMonthly} / {p.periodDays} days{pay.currency !== p.currency ? ` ≈ ${Math.round(p.priceMonthly * pay.conversion)} ${pay.currency}` : ""}</div></button>)}</div>
+      <div className="grid sm:grid-cols-3 gap-2">{info.plans.filter((p) => p.priceMonthly > 0).map((p) => <button key={p.id} className={`card p-3 text-left ${planId === p.id ? "border-accent" : ""}`} onClick={() => setPlanId(p.id)}><div className="font-medium">{p.name}</div><div className="text-sm text-muted">{p.currency === "BDT" ? "৳" : p.currency + " "}{p.priceMonthly}{p.perSeat ? " per user" : ""} / {p.periodDays} days{pay.currency !== p.currency ? ` ≈ ${Math.round(p.priceMonthly * pay.conversion)} ${pay.currency}` : ""}</div></button>)}</div>
+      {plan?.perSeat && <div className="card p-4 text-sm flex items-center gap-3"><span>Number of users (seats):</span><input className="input !w-24" type="number" min={plan.minSeats ?? 1} value={nSeats} onChange={(e) => setSeats(Number(e.target.value))} /><span className="text-muted">min {plan.minSeats ?? 1} · total {local} {pay.currency}</span></div>}
       {plan && info.gateways.length > 0 && (
         <div className="card p-4 grid gap-2 text-sm">
           <div className="font-medium">Pay online — activated instantly</div>

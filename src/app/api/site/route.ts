@@ -6,5 +6,5 @@ import { enabledGateways } from "@/lib/saas/gateways";
 export const runtime = "nodejs";
 export async function GET() {
   const site = await getSite();
-  return Response.json({ mode: appMode(), site, gateways: await enabledGateways(), plans: (await getPlans()).map(({ id, name, priceMonthly, priceUSD, currency, dailyRequests, features, localAI, periodDays }) => ({ id, name, priceMonthly, priceUSD, currency, dailyRequests, features, localAI, periodDays: periodDays ?? 30 })) });
+  return Response.json({ mode: appMode(), site, gateways: await enabledGateways(), plans: (await getPlans()).map(({ id, name, priceMonthly, priceUSD, currency, dailyRequests, features, localAI, periodDays, perSeat, minSeats }) => ({ id, name, priceMonthly, priceUSD, currency, dailyRequests, features, localAI, periodDays: periodDays ?? 30, perSeat: !!perSeat, minSeats: minSeats ?? 1 })) });
 }

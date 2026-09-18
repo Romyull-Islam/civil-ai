@@ -3,13 +3,14 @@ import { useEffect, useState } from "react";
 import { Shield, KeyRound, Users, BarChart3, Layers, Save, RefreshCw, Wallet, LifeBuoy, Globe } from "lucide-react";
 import type { SiteSettings } from "@/lib/saas/site";
 import { PROVIDERS } from "@/lib/ai/registry";
+import { DEFAULT_PLANS } from "@/lib/saas/plans";
 import { useSession } from "@/lib/client/session";
 import type { Plan } from "@/lib/saas/plans";
 
-type Tab = "users" | "keys" | "plans" | "usage" | "payments" | "support" | "site" | "gateways";
+type Tab = "users" | "keys" | "plans" | "usage" | "payments" | "support" | "site" | "gateways" | "teams";
 type Role = "superadmin" | "admin" | "support" | "user";
 interface AdminUser { id: string; email: string; name: string; role: Role; plan: string; planExpires: number | null; createdAt: number; disabled: number }
-const TAB_ROLES: Record<Tab, Role[]> = { gateways: ["superadmin", "admin"], users: ["superadmin", "admin", "support"], payments: ["superadmin", "admin", "support"], support: ["superadmin", "admin", "support"], keys: ["superadmin", "admin"], plans: ["superadmin", "admin"], site: ["superadmin", "admin"], usage: ["superadmin", "admin"] };
+const TAB_ROLES: Record<Tab, Role[]> = { gateways: ["superadmin", "admin"], teams: ["superadmin", "admin", "support"], users: ["superadmin", "admin", "support"], payments: ["superadmin", "admin", "support"], support: ["superadmin", "admin", "support"], keys: ["superadmin", "admin"], plans: ["superadmin", "admin"], site: ["superadmin", "admin"], usage: ["superadmin", "admin"] };
 
 export default function AdminPage() {
   const s = useSession();
@@ -17,12 +18,12 @@ export default function AdminPage() {
   if (!s) return <div className="p-6 text-sm text-muted">Loading…</div>;
   const role = s.user?.role ?? "user";
   if (s.mode !== "saas" || role === "user") return <div className="p-6 text-sm text-err">Staff access only.</div>;
-  const tabs = ([["users", Users, "Users & subscriptions"], ["payments", Wallet, "Payments"], ["support", LifeBuoy, "Support tickets"], ["keys", KeyRound, "Provider API keys"], ["gateways", Wallet, "Payment gateways"], ["plans", Layers, "Plans"], ["site", Globe, "Site & payment settings"], ["usage", BarChart3, "Usage"]] as const).filter(([id]) => TAB_ROLES[id].includes(role));
+  const tabs = ([["users", Users, "Users & subscriptions"], ["teams", Users, "Teams"], ["payments", Wallet, "Payments"], ["support", LifeBuoy, "Support tickets"], ["keys", KeyRound, "Provider API keys"], ["gateways", Wallet, "Payment gateways"], ["plans", Layers, "Plans"], ["site", Globe, "Site & payment settings"], ["usage", BarChart3, "Usage"]] as const).filter(([id]) => TAB_ROLES[id].includes(role));
   return (
     <div className="h-full overflow-y-auto"><div className="max-w-6xl mx-auto p-4 grid gap-4">
       <div className="flex items-center gap-2"><Shield className="text-accent" /><h1 className="text-lg font-semibold">{role === "support" ? "Helpdesk" : "Admin"}</h1><span className="badge">{role}</span></div>
       <div className="flex gap-2 flex-wrap">{tabs.map(([id, Icon, label]) => <button key={id} className={`btn btn-sm ${tab === id ? "btn-primary" : ""}`} onClick={() => setTab(id)}><Icon size={14} /> {label}</button>)}</div>
-      {tab === "users" && <UsersTab me={s.user!} />}{tab === "payments" && <PaymentsTab />}{tab === "support" && <SupportTab />}{tab === "keys" && <KeysTab />}{tab === "gateways" && <GatewaysTab />}{tab === "plans" && <PlansTab />}{tab === "site" && <SiteTab />}{tab === "usage" && <UsageTab />}
+      {tab === "users" && <UsersTab me={s.user!} />}{tab === "teams" && <TeamsTab />}{tab === "payments" && <PaymentsTab />}{tab === "support" && <SupportTab />}{tab === "keys" && <KeysTab />}{tab === "gateways" && <GatewaysTab />}{tab === "plans" && <PlansTab />}{tab === "site" && <SiteTab />}{tab === "usage" && <UsageTab />}
     </div></div>
   );
 }
@@ -92,17 +93,54 @@ function KeysTab() {
 }
 
 function PlansTab() {
-  const [text, setText] = useState(""); const [err, setErr] = useState<string | null>(null); const [ok, setOk] = useState(false);
-  const load = () => fetch("/api/admin/plans").then((r) => r.json()).then((j) => setText(JSON.stringify(j.plans, null, 2)));
+  const [plans, setPlans] = useState<Plan[]>([]); const [keys, setKeys] = useState<Record<string, { set: boolean; fromEnv: boolean }>>({}); const [err, setErr] = useState<string | null>(null); const [ok, setOk] = useState(false); const [raw, setRaw] = useState(false); const [text, setText] = useState("");
+  const load = () => Promise.all([fetch("/api/admin/plans").then((r) => r.json()), fetch("/api/admin/keys").then((r) => r.json())]).then(([p, k]) => { setPlans(p.plans); setText(JSON.stringify(p.plans, null, 2)); setKeys(k); });
   useEffect(() => { load(); }, []);
-  const save = async () => { setErr(null); try { const plans = JSON.parse(text); const r = await fetch("/api/admin/plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plans }) }); const j = await r.json(); if (!r.ok) throw new Error(j.error); setOk(true); setTimeout(() => setOk(false), 1500); } catch (e) { setErr((e as Error).message); } };
-  const reset = async () => { const j = await fetch("/api/admin/plans").then((r) => r.json()); setText(JSON.stringify(j.defaults, null, 2)); };
+  const save = async (list: Plan[]) => { setErr(null); const r = await fetch("/api/admin/plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plans: list }) }); const j = await r.json(); if (!r.ok) { setErr(j.error); return; } setPlans(j.plans); setText(JSON.stringify(j.plans, null, 2)); setOk(true); setTimeout(() => setOk(false), 1500); };
+  const upd = (i: number, patch: Partial<Plan>) => setPlans(plans.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  const toggleModel = (i: number, provider: string, model: string) => {
+    const p = plans[i]; const prov = p.providers.find((x) => x.provider === provider);
+    let providers = p.providers.map((x) => ({ ...x, models: [...x.models] }));
+    if (!prov) providers.push({ provider, models: [model] });
+    else { const idx = providers.findIndex((x) => x.provider === provider); const has = providers[idx].models.includes(model); providers[idx].models = has ? providers[idx].models.filter((m) => m !== model) : [...providers[idx].models, model]; if (!providers[idx].models.length) providers = providers.filter((_, k) => k !== idx); }
+    upd(i, { providers });
+  };
+  const addPlan = () => setPlans([...plans, { id: `plan${plans.length + 1}`, name: "New plan", priceMonthly: 0, priceUSD: 0, currency: "BDT", dailyRequests: 50, vision: false, localAI: false, periodDays: 30, graceDays: 3, providers: [], features: [] }]);
   return (
-    <div className="card p-4 grid gap-2">
-      <p className="text-xs text-muted">Each plan lists the providers and model ids its subscribers may use (the first entry is the default), the daily request limit and the marketing features. Users pick among their allowed models from the chat selector.</p>
-      <textarea className="textarea font-mono text-xs min-h-96" value={text} onChange={(e) => setText(e.target.value)} />
+    <div className="grid gap-3">
+      <p className="text-xs text-muted">Each plan lists which models its subscribers can choose in the chat selector (the first ticked model of the first provider is the default). Providers marked <span className="text-err">no key</span> will not work until a key is added in <b>Provider API keys</b>. Prices are in the plan currency (৳ BDT); the USD price is used by Stripe. <button className="text-accent2" onClick={() => setRaw(!raw)}>{raw ? "Visual editor" : "Edit as JSON"}</button></p>
+      {raw ? (
+        <div className="card p-4 grid gap-2"><textarea className="textarea font-mono text-xs min-h-96" value={text} onChange={(e) => setText(e.target.value)} /><div className="flex gap-2"><button className="btn btn-primary" onClick={() => { try { save(JSON.parse(text)); } catch (e) { setErr((e as Error).message); } }}><Save size={14} /> Save JSON</button><button className="btn" onClick={() => setText(JSON.stringify(DEFAULT_PLANS, null, 2))}>Load defaults</button></div></div>
+      ) : plans.map((p, i) => (
+        <div key={i} className="card p-4 grid gap-3 text-sm">
+          <div className="grid sm:grid-cols-4 gap-2">
+            <div><label className="label">ID</label><input className="input mt-1" value={p.id} onChange={(e) => upd(i, { id: e.target.value.replace(/[^a-z0-9_-]/gi, "").toLowerCase() })} /></div>
+            <div><label className="label">Name</label><input className="input mt-1" value={p.name} onChange={(e) => upd(i, { name: e.target.value })} /></div>
+            <div><label className="label">Price / period ({p.currency})</label><input className="input mt-1" type="number" value={p.priceMonthly} onChange={(e) => upd(i, { priceMonthly: Number(e.target.value) })} /></div>
+            <div><label className="label">Price USD (Stripe)</label><input className="input mt-1" type="number" step="0.1" value={p.priceUSD ?? 0} onChange={(e) => upd(i, { priceUSD: Number(e.target.value) })} /></div>
+            <div><label className="label">AI requests / day</label><input className="input mt-1" type="number" value={p.dailyRequests} onChange={(e) => upd(i, { dailyRequests: Number(e.target.value) })} /></div>
+            <div><label className="label">Period (days)</label><input className="input mt-1" type="number" value={p.periodDays ?? 30} onChange={(e) => upd(i, { periodDays: Number(e.target.value) })} /></div>
+            <div><label className="label">Grace (days)</label><input className="input mt-1" type="number" value={p.graceDays ?? 3} onChange={(e) => upd(i, { graceDays: Number(e.target.value) })} /></div>
+            <div><label className="label">Per-seat team plan?</label><select className="select mt-1" value={p.perSeat ? "yes" : "no"} onChange={(e) => upd(i, { perSeat: e.target.value === "yes", minSeats: p.minSeats ?? 3 })}><option value="no">No (single user)</option><option value="yes">Yes (price × seats)</option></select></div>
+            {p.perSeat && <div><label className="label">Minimum seats</label><input className="input mt-1" type="number" value={p.minSeats ?? 3} onChange={(e) => upd(i, { minSeats: Number(e.target.value) })} /></div>}
+            <div className="flex items-center gap-4 pt-5"><label className="flex items-center gap-1"><input type="checkbox" checked={p.vision} onChange={(e) => upd(i, { vision: e.target.checked })} /> image input</label><label className="flex items-center gap-1"><input type="checkbox" checked={p.localAI} onChange={(e) => upd(i, { localAI: e.target.checked })} /> offline model (desktop)</label></div>
+          </div>
+          <div><label className="label">Models available to subscribers</label>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-1">
+              {PROVIDERS.filter((pr) => pr.id !== "local" && pr.id !== "ollama").map((pr) => (
+                <div key={pr.id} className="border border-border rounded-lg p-2">
+                  <div className="text-xs font-medium flex items-center gap-2">{pr.label}{keys[pr.id] && !(keys[pr.id].set || keys[pr.id].fromEnv) && <span className="text-err">no key</span>}</div>
+                  {pr.models.map((m) => <label key={m.id} className="flex items-center gap-1 text-xs mt-1"><input type="checkbox" checked={!!p.providers.find((x) => x.provider === pr.id)?.models.includes(m.id)} onChange={() => toggleModel(i, pr.id, m.id)} /> {m.label}{m.note ? <span className="text-muted"> — {m.note}</span> : null}</label>)}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div><label className="label">Features (one per line, shown on the Plans page)</label><textarea className="textarea mt-1 min-h-20" value={p.features.join("\n")} onChange={(e) => upd(i, { features: e.target.value.split("\n").filter(Boolean) })} /></div>
+          <div className="flex gap-2"><button className="btn btn-sm text-err" onClick={() => setPlans(plans.filter((_, j) => j !== i))} disabled={p.id === "free"}>Remove plan</button></div>
+        </div>
+      ))}
+      {!raw && <div className="flex gap-2 items-center"><button className="btn btn-primary" onClick={() => save(plans)}><Save size={14} /> Save plans</button><button className="btn" onClick={addPlan}>Add plan</button><button className="btn" onClick={() => setPlans(DEFAULT_PLANS)}>Load defaults</button>{ok && <span className="text-xs text-ok">saved</span>}</div>}
       {err && <div className="text-xs text-err">{err}</div>}
-      <div className="flex gap-2"><button className="btn btn-primary" onClick={save}><Save size={14} /> Save plans</button><button className="btn" onClick={reset}>Load defaults</button>{ok && <span className="text-xs text-ok self-center">saved</span>}</div>
     </div>
   );
 }
@@ -221,6 +259,38 @@ function GatewaysTab() {
           <div><button className="btn btn-sm" onClick={() => save(g)}><Save size={13} /> Save</button></div>
         </div>); })}
       {msg && <div className="text-xs text-muted">{msg}</div>}
+    </div>
+  );
+}
+
+function TeamsTab() {
+  interface T { id: string; name: string; plan: string; seats: number; expires: number | null; ownerEmail?: string; members: { email: string }[] }
+  const [teams, setTeams] = useState<T[]>([]); const [plans, setPlans] = useState<Plan[]>([]); const [nt, setNt] = useState({ ownerEmail: "", name: "", plan: "team", seats: 3 }); const [err, setErr] = useState<string | null>(null);
+  const load = () => { fetch("/api/admin/teams").then((r) => r.json()).then((j) => setTeams(j.teams ?? [])); fetch("/api/admin/plans").then((r) => r.json()).then((j) => setPlans(j.plans ?? [])); };
+  useEffect(() => { load(); }, []);
+  const create = async () => { setErr(null); const r = await fetch("/api/admin/teams", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(nt) }); const j = await r.json(); if (!r.ok) { setErr(j.error); return; } load(); };
+  const patch = async (id: string, body: Record<string, unknown>) => { await fetch("/api/admin/teams", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) }); load(); };
+  return (
+    <div className="grid gap-3">
+      <p className="text-xs text-muted">Teams are created automatically when someone pays for a per-seat plan; you can also create one manually (e.g. for an enterprise invoice). Owners add members on their Team page; members must have accounts.</p>
+      <div className="card p-3 grid sm:grid-cols-5 gap-2 items-end text-sm">
+        <div className="sm:col-span-5 label">Create team manually</div>
+        <input className="input" placeholder="owner account email" value={nt.ownerEmail} onChange={(e) => setNt({ ...nt, ownerEmail: e.target.value })} />
+        <input className="input" placeholder="team name" value={nt.name} onChange={(e) => setNt({ ...nt, name: e.target.value })} />
+        <select className="select" value={nt.plan} onChange={(e) => setNt({ ...nt, plan: e.target.value })}>{plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <input className="input" type="number" min={1} value={nt.seats} onChange={(e) => setNt({ ...nt, seats: Number(e.target.value) })} />
+        <button className="btn btn-primary" onClick={create} disabled={!nt.ownerEmail}>Create</button>
+        {err && <div className="sm:col-span-5 text-xs text-err">{err}</div>}
+      </div>
+      {teams.map((t) => (
+        <div key={t.id} className="card p-3 text-sm grid gap-2">
+          <div className="flex flex-wrap items-center gap-2"><span className="font-medium">{t.name}</span><span className="text-xs text-muted">owner {t.ownerEmail}</span><span className="badge">{t.plan}</span><span className="badge">{t.members.length} / {t.seats} seats</span>
+            <input className="input !w-20 !py-0.5 ml-auto" type="number" min={1} value={t.seats} onChange={(e) => patch(t.id, { seats: Number(e.target.value) })} title="seats" />
+            <input className="input !w-40 !py-0.5" type="date" value={t.expires ? new Date(t.expires).toISOString().slice(0, 10) : ""} onChange={(e) => patch(t.id, { expires: e.target.value ? new Date(e.target.value).getTime() : null })} />
+            <button className="btn btn-sm text-err" onClick={() => { if (confirm("Delete this team? Members return to their own plans.")) patch(t.id, { remove: true }); }}>Delete</button></div>
+          <div className="text-xs text-muted">{t.members.map((m) => m.email).join(", ")}</div>
+        </div>
+      ))}
     </div>
   );
 }

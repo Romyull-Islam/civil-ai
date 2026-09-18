@@ -8,7 +8,8 @@ export interface SessionInfo {
   allowedModels?: { provider: string; model: string }[];
   usage?: { used: number; limit: number | null; remaining: number | null };
   renewal?: { status: "none" | "ok" | "expiring" | "grace" | "expired"; daysLeft: number | null };
-  plans?: { id: string; name: string; priceMonthly: number; currency: string; dailyRequests: number; features: string[] }[];
+  plans?: { id: string; name: string; priceMonthly: number; currency: string; dailyRequests: number; features: string[]; perSeat?: boolean; minSeats?: number }[];
+  inTeam?: boolean;
   /** desktop/byok: linked hosted account */
   cloud?: { linked: boolean; backendUrl?: string; email?: string; offline?: boolean; allowedModels?: { provider: string; model: string }[]; plan?: { name: string }; usage?: { used: number; limit: number | null; remaining: number | null } };
 }

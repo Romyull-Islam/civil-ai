@@ -1,4 +1,4 @@
-import { getDB, isStaff, type User, type Role } from "./db";
+import { getDB, isStaff, type User, type Role, type Team } from "./db";
 import { hashPassword, verifyPassword, newId, newToken, encrypt, decrypt } from "./crypto";
 import { DEFAULT_PLANS, planModels, type Plan } from "./plans";
 import { PROVIDERS, type KeyBag } from "@/lib/ai/registry";
@@ -85,12 +85,13 @@ export async function verifyEmail(user: User, code: string): Promise<boolean> {
 }
 
 // ---------- manual payments (bKash / Nagad / Rocket / QR / bank) ----------
-export async function submitPayment(user: User, input: { plan: string; method: string; amount: number; currency: string; txnId: string; sender: string }): Promise<Payment> {
+export async function submitPayment(user: User, input: { plan: string; method: string; amount: number; currency: string; txnId: string; sender: string; seats?: number }): Promise<Payment> {
   const plans = await getPlans();
   const plan = plans.find((p) => p.id === input.plan);
   if (!plan || plan.priceMonthly <= 0) throw new Error("Choose a paid plan");
   if (!input.txnId?.trim()) throw new Error("Transaction ID is required");
-  const p: Payment = { id: newId(), userId: user.id, email: user.email, plan: plan.id, method: input.method.slice(0, 30), amount: Number(input.amount) || 0, currency: (input.currency || "BDT").slice(0, 8), txnId: input.txnId.trim().slice(0, 64), sender: (input.sender ?? "").trim().slice(0, 40), status: "pending", note: "", createdAt: Date.now(), reviewedAt: null };
+  const seats = plan.perSeat ? Math.max(plan.minSeats ?? 1, Math.floor(Number(input.seats) || 0)) : 1;
+  const p: Payment = { id: newId(), userId: user.id, email: user.email, plan: plan.id, method: input.method.slice(0, 30), amount: Number(input.amount) || 0, currency: (input.currency || "BDT").slice(0, 8), txnId: input.txnId.trim().slice(0, 64), sender: (input.sender ?? "").trim().slice(0, 40), status: "pending", note: seats > 1 ? `seats=${seats}` : "", createdAt: Date.now(), reviewedAt: null, seats };
   await (await getDB()).createPayment(p);
   return p;
 }
@@ -100,7 +101,7 @@ export async function reviewPayment(id: string, status: "approved" | "rejected",
   if (!p) return null;
   await db.updatePayment(id, { status, note, reviewedAt: Date.now() });
   if (status === "approved") {
-    const r = await activatePlan(p.userId, p.plan);
+    const r = await activatePlan(p.userId, p.plan, undefined, p.seats);
     if (r) { const site = await getSite(); sendEmail(p.email, `${site.appName}: ${r.plan.name} plan activated`, `Your payment (${p.method} ${p.txnId}) was verified. The ${r.plan.name} plan is active until ${new Date(r.expires).toDateString()}.`).catch(() => {}); }
   }
   return db.getPayment(id);
@@ -159,6 +160,12 @@ export async function setPlans(plans: Plan[]) { await (await getDB()).setSetting
 
 export async function planFor(user: User): Promise<Plan> {
   const plans = await getPlans();
+  // Team membership grants the team's plan to every member while the team subscription is active (incl. grace).
+  const team = await (await getDB()).getTeamForUser(user.id);
+  if (team) {
+    const tp = plans.find((p) => p.id === team.plan);
+    if (tp && (team.expires === null || team.expires + (tp.graceDays ?? 3) * 86400000 > Date.now())) return tp;
+  }
   const current = plans.find((p) => p.id === user.plan);
   const grace = (current?.graceDays ?? 3) * 86400000;
   const expired = user.planExpires !== null && user.planExpires + grace < Date.now();
@@ -176,7 +183,7 @@ export function renewalState(user: User, plan: Plan): { status: "none" | "ok" | 
 }
 
 /** Activate/extend a plan (used by manual approval and payment webhooks). Extends from the current expiry when still active. */
-export async function activatePlan(userId: string, planId: string, days?: number): Promise<{ expires: number; plan: Plan } | null> {
+export async function activatePlan(userId: string, planId: string, days?: number, seats?: number): Promise<{ expires: number; plan: Plan } | null> {
   const db = await getDB();
   const plan = (await getPlans()).find((x) => x.id === planId);
   const user = await db.getUserById(userId);
@@ -184,6 +191,13 @@ export async function activatePlan(userId: string, planId: string, days?: number
   const base = user.plan === plan.id && user.planExpires && user.planExpires > Date.now() ? user.planExpires : Date.now();
   const expires = base + (days ?? plan.periodDays ?? 30) * 86400000;
   await db.updateUser(user.id, { plan: plan.id, planExpires: expires });
+  if (plan.perSeat) {
+    // Buyer becomes (or remains) the owner of a team sized by the paid seats.
+    const n = Math.max(plan.minSeats ?? 1, seats ?? plan.minSeats ?? 1);
+    const team = await db.getTeamByOwner(user.id);
+    if (team) await db.updateTeam(team.id, { plan: plan.id, seats: n, expires });
+    else await db.createTeam({ id: newId(), name: `${user.name || user.email}'s team`, ownerId: user.id, plan: plan.id, seats: n, expires, createdAt: Date.now() });
+  }
   return { expires, plan };
 }
 
@@ -299,3 +313,32 @@ export async function totpDisable(user: User, password: string): Promise<void> {
   await (await getDB()).setSetting(`totp:${user.id}`, "");
 }
 export async function totpEnabled(userId: string): Promise<boolean> { return !!(await (await getDB()).getSetting(`totp:${userId}`)); }
+
+// ---------- teams ----------
+export async function myTeam(user: User): Promise<{ team: Team; members: PublicUser[]; owner: boolean; plan: Plan | undefined } | null> {
+  const db = await getDB();
+  const team = (await db.getTeamByOwner(user.id)) ?? (await db.getTeamForUser(user.id));
+  if (!team) return null;
+  const members = (await db.listTeamMembers(team.id)).map(publicUser);
+  return { team, members, owner: team.ownerId === user.id, plan: (await getPlans()).find((p) => p.id === team.plan) };
+}
+export async function addTeamMember(owner: User, email: string): Promise<void> {
+  const db = await getDB();
+  const team = await db.getTeamByOwner(owner.id);
+  if (!team) throw new Error("You do not own a team");
+  const members = await db.listTeamMembers(team.id);
+  if (members.length >= team.seats) throw new Error(`All ${team.seats} seats are used — buy more seats to add members`);
+  const u = await db.getUserByEmail(email);
+  if (!u) throw new Error("No account with that email — ask them to sign up first (free), then add them");
+  if (members.some((m) => m.id === u.id)) throw new Error("Already a member");
+  await db.addTeamMember(team.id, u.id);
+  const site = await getSite();
+  sendEmail(u.email, `${site.appName}: you were added to ${team.name}`, `${owner.name || owner.email} added you to their team. Your account now has the ${team.plan} plan features.`).catch(() => {});
+}
+export async function removeTeamMember(owner: User, userId: string): Promise<void> {
+  const db = await getDB();
+  const team = await db.getTeamByOwner(owner.id);
+  if (!team) throw new Error("You do not own a team");
+  if (userId === owner.id) throw new Error("The owner cannot be removed");
+  await db.removeTeamMember(team.id, userId);
+}

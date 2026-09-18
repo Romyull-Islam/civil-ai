@@ -13,7 +13,7 @@ export default function PricingPage() {
         <div className="grid md:grid-cols-3 gap-4">
           {plans.map((p) => (
             <div key={p.id} className={`card p-5 grid gap-3 ${s?.user?.plan === p.id ? "border-accent" : ""}`}>
-              <div><div className="font-semibold text-lg">{p.name}</div><div className="text-2xl font-bold mt-1">{p.priceMonthly === 0 ? "Free" : `${p.currency === "USD" ? "$" : p.currency === "BDT" ? "৳" : p.currency + " "}${p.priceMonthly}`}<span className="text-sm text-muted font-normal">{p.priceMonthly ? " / month" : ""}</span></div></div>
+              <div><div className="font-semibold text-lg">{p.name}</div><div className="text-2xl font-bold mt-1">{p.priceMonthly === 0 ? "Free" : `${p.currency === "USD" ? "$" : p.currency === "BDT" ? "৳" : p.currency + " "}${p.priceMonthly}`}<span className="text-sm text-muted font-normal">{p.priceMonthly ? (p.perSeat ? ` per user / month (min ${p.minSeats})` : " / month") : ""}</span></div></div>
               <ul className="grid gap-1 text-sm">{p.features.map((f) => <li key={f} className="flex gap-2"><Check size={16} className="text-ok shrink-0 mt-0.5" />{f}</li>)}</ul>
               {s?.user?.plan === p.id ? <span className="badge justify-self-start text-ok border-ok/40">current plan</span> : s?.user ? (p.priceMonthly > 0 ? <Link href={`/subscribe?plan=${p.id}`} className="btn btn-primary justify-center">Subscribe (bKash / Nagad / Rocket / QR)</Link> : <span className="text-xs text-muted">Included</span>) : <Link href="/signup" className="btn btn-primary justify-center">Get started</Link>}
             </div>

@@ -10,7 +10,7 @@ import { searchCodes } from "@/lib/eng/codes";
 import { evaluate } from "@/lib/eng/calc";
 import { runTool, selectToolsForText, TOOLS } from "@/lib/tools";
 import { recommendModel, type Hardware } from "@/lib/local";
-import { stripLeakedReasoning } from "@/lib/ai/agent";
+import { stripLeakedReasoning, compactHistory } from "@/lib/ai/agent";
 import { planLayout, planBuilding } from "@/lib/eng/layout";
 import { toDxf } from "@/lib/drawing/dxf";
 import { toSvg } from "@/lib/drawing/svg";
@@ -262,5 +262,18 @@ describe("building planner", () => {
     const r = planBuilding({ plot: { shape: "polygon", points: [[0, 0], [14, 0], [13, 11], [1, 12]] }, buildingType: "shop_house", storeys: 2, shops: 3, bedrooms: 2 });
     expect(r.floors[0].layout.rooms.filter((x) => /Shop/.test(x.name)).length).toBe(3);
     expect(r.notes.some((n) => /Irregular/.test(n))).toBe(true);
+  });
+});
+
+describe("history compaction", () => {
+  it("leaves short conversations untouched and compresses long ones", () => {
+    const short = [{ role: "user" as const, parts: [{ type: "text" as const, text: "hi" }] }];
+    expect(compactHistory(short)).toBe(short);
+    const long = Array.from({ length: 60 }, (_, i) => ({ role: (i % 2 ? "assistant" : "user") as "user" | "assistant", parts: [{ type: "text" as const, text: "x".repeat(4000) + i }] }));
+    const c = compactHistory(long, 24000);
+    expect(c.length).toBeLessThan(long.length);
+    expect(c[0].role).toBe("user");
+    expect(JSON.stringify(c).length).toBeLessThan(24000 * 4 * 1.2);
+    expect(c[c.length - 1]).toEqual(long[long.length - 1]);
   });
 });

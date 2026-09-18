@@ -16,6 +16,9 @@ export interface Plan {
   periodDays?: number;
   /** days after expiry during which the plan keeps working while the user renews (default 3) */
   graceDays?: number;
+  /** team plan: price is per seat per period; the buyer becomes the team owner and adds members */
+  perSeat?: boolean;
+  minSeats?: number;
 }
 
 export const DEFAULT_PLANS: Plan[] = [
@@ -28,6 +31,9 @@ export const DEFAULT_PLANS: Plan[] = [
   { id: "max", name: "Max", priceMonthly: 1000, priceUSD: 8, currency: "BDT", dailyRequests: 300, vision: true, localAI: true, periodDays: 30,
     providers: [{ provider: "groq", models: ["openai/gpt-oss-120b", "qwen/qwen3.6-27b"] }, { provider: "gemini", models: ["gemini-3.8-flash"] }, { provider: "qwen", models: ["qwen3.6-plus", "qwen3-max"] }, { provider: "anthropic", models: ["claude-haiku-4-5", "claude-sonnet-5"] }, { provider: "openai", models: ["gpt-5-mini"] }],
     features: ["300 AI requests / day", "Premium models incl. Claude Sonnet 5 and Qwen 3 Max", "Offline local model in the desktop app", "Priority support"] },
+  { id: "team", name: "Team / Enterprise", priceMonthly: 800, priceUSD: 6.5, currency: "BDT", dailyRequests: 300, vision: true, localAI: true, periodDays: 30, graceDays: 5, perSeat: true, minSeats: 3,
+    providers: [{ provider: "groq", models: ["openai/gpt-oss-120b", "qwen/qwen3.6-27b"] }, { provider: "gemini", models: ["gemini-3.8-flash"] }, { provider: "qwen", models: ["qwen3.6-plus", "qwen3-max"] }, { provider: "anthropic", models: ["claude-haiku-4-5", "claude-sonnet-5"] }, { provider: "openai", models: ["gpt-5-mini"] }],
+    features: ["Everything in Max, for every team member", "৳800 per user / month (min 3 users)", "Owner adds and removes members", "One invoice for the whole team", "Priority support"] },
 ];
 
 export function planModels(p: Plan): { provider: string; model: string }[] {

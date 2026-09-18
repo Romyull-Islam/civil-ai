@@ -28,7 +28,7 @@ export async function POST(req: Request) {
     const txnId = String(o.id);
     if ((await db.listPayments({ userId: user.id, limit: 500 })).some((p) => p.txnId === txnId)) return Response.json({ duplicate: true });
     const r = await activatePlan(user.id, plan);
-    await db.createPayment({ id: newId(), userId: user.id, email: user.email, plan, method: "stripe", amount: Number(o.amount_paid ?? 0) / 100, currency: String(o.currency ?? "usd").toUpperCase(), txnId, sender: "", status: "approved", note: "auto (stripe recurring)", createdAt: Date.now(), reviewedAt: Date.now() });
+    await db.createPayment({ id: newId(), userId: user.id, email: user.email, plan, method: "stripe", amount: Number(o.amount_paid ?? 0) / 100, currency: String(o.currency ?? "usd").toUpperCase(), txnId, sender: "", status: "approved", note: "auto (stripe recurring)", createdAt: Date.now(), reviewedAt: Date.now(), seats: 1 });
     return Response.json({ ok: !!r });
   }
   return Response.json({ ignored: ev.type });

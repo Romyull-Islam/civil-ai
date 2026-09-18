@@ -95,6 +95,23 @@ Users: install → the local model downloads automatically → *Settings → Civ
 
 **Local model only for paid plans** — each plan has `localAI: true/false` (Free: no; Pro/Business: yes). The desktop app installs the offline model only after the user links an account whose plan includes it; the entitlement is cached so the model keeps working offline and is re-checked every 14 days when online. For your own testing set `CIVIL_AI_LOCAL_AI_FREE=1`.
 
+## Plans and models (admin decides)
+
+Admin → *Plans* is a visual editor: for each plan tick the exact models its subscribers may pick (grouped by provider, with a "no key" warning if that provider has no API key yet), set the daily request limit, price (৳ and USD for Stripe), period, grace days, image input and offline-model entitlement, and the feature lines shown on the Plans page. Users only ever see the models of their plan in the chat selector.
+
+## Team / Enterprise accounts (per-seat pricing)
+
+- The **Team** plan is per user per month (default ৳800/user, minimum 3 users; editable). The buyer chooses the number of seats on the Subscribe page (manual or online payment = price × seats) and becomes the **team owner**.
+- Owner → *Team* page: add members by their account email (they sign up free first), remove members, see seats used and expiry. Every member gets the team plan's models, limits and offline-model entitlement while the team subscription is active; removed members fall back to their own plan.
+- Renewing extends the team's expiry; buying again with a different seat count resizes the team. Admin/support → *Teams* tab: create teams manually (enterprise invoices), change seats/expiry, delete.
+
+## Chat data: what is stored where
+
+- Conversations are stored **only on the user's device** (browser IndexedDB, or the desktop app's profile). The server stores accounts, plans, payments, tickets and usage counters — never chat content. Model providers are stateless: each request resends the needed history and they keep nothing for us, so there is no storage cost on your side.
+- Long conversations are **compressed before sending**: images and old tool outputs are summarised, and if the history is still above the model budget the oldest turns are dropped with a note (the user's stored chat is untouched).
+- Users can delete any chat, delete all chats, **export** all chats to a JSON file (keep on their PC / move to another device) and **import** them back. Chats not opened for 30 days are deleted automatically (user-adjustable in Settings: 7 days … never).
+- Trade-off: web users switching browsers/devices do not see old chats unless they export/import. Server-side sync for paid plans can be added later (it would then cost storage).
+
 ## Online payment gateways (built in — add credentials when you have them)
 
 Admin → *Payment gateways*: enable, choose sandbox/live, paste credentials. Customers then see "Pay online" buttons on the Subscribe page and plans activate instantly; the manual bKash/Nagad/Rocket flow stays as fallback.

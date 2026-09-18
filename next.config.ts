@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["@anthropic-ai/sdk", "@google/genai", "openai", "nodemailer", "pg"],
   poweredByHeader: false,
+  // keep the desktop bundle and docs out of the standalone server (otherwise output tracing recursively copies desktop/app)
+  outputFileTracingExcludes: { "*": ["./desktop/**", "./docs/**", "./tests/**", "./scripts/**"] },
   async headers() {
     const csp = [
       "default-src 'self'",

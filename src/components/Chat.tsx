@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { nanoid } from "nanoid";
-import { Send, Square, Plus, Trash2, ImagePlus, X, Sparkles } from "lucide-react";
+import { Send, Square, Plus, Trash2, ImagePlus, X, Sparkles, Download, Upload } from "lucide-react";
 import { db, type Conversation, type UIMessage } from "@/lib/db";
 import { useSettings } from "@/lib/client/settings";
 import { streamChat } from "@/lib/client/stream";
@@ -47,15 +47,20 @@ export function Chat() {
   const refreshList = useCallback(() => { db.conversations.orderBy("updatedAt").reverse().limit(100).toArray().then((rows) => setConvs(rows)); }, []);
   useEffect(() => {
     let alive = true;
-    db.conversations.orderBy("updatedAt").reverse().limit(100).toArray().then((rows) => { if (alive) setConvs(rows); });
+    const days = settings.autoDeleteDays;
+    const cleanup = days > 0 ? db.conversations.where("updatedAt").below(now() - days * 86400000).delete() : Promise.resolve(0);
+    cleanup.catch(() => 0).then(() => db.conversations.orderBy("updatedAt").reverse().limit(200).toArray()).then((rows) => { if (alive) setConvs(rows); });
     return () => { alive = false; };
-  }, []);
+  }, [settings.autoDeleteDays]);
+  const deleteAll = async () => { if (!confirm("Delete all conversations stored on this device?")) return; await db.conversations.clear(); setConv(null); refreshList(); };
+  const exportAll = async () => { const rows = await db.conversations.toArray(); const blob = new Blob([JSON.stringify({ app: "civil-ai", version: 1, exportedAt: new Date().toISOString(), conversations: rows }, null, 1)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `civil-ai-chats-${new Date().toISOString().slice(0, 10)}.json`; a.click(); };
+  const importFile = async (f: File | null) => { if (!f) return; try { const j = JSON.parse(await f.text()) as { conversations?: Conversation[] }; if (!Array.isArray(j.conversations)) throw new Error("bad file"); await db.conversations.bulkPut(j.conversations); refreshList(); } catch { alert("Not a Civil AI chat export."); } };
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [conv?.messages.length, status]);
 
   const persist = useCallback(async (c: Conversation) => { await db.conversations.put(c); refreshList(); }, [refreshList]);
 
   const newConversation = () => { setConv(null); setInput(""); setImages([]); };
-  const openConversation = async (id: string) => { const c = await db.conversations.get(id); if (c) setConv(c); };
+  const openConversation = async (id: string) => { const c = await db.conversations.get(id); if (c) { setConv(c); db.conversations.update(id, { updatedAt: now() }).catch(() => {}); } };
   const deleteConversation = async (id: string) => { await db.conversations.delete(id); if (conv?.id === id) setConv(null); refreshList(); };
 
   const addImages = async (files: FileList | null) => {
@@ -123,7 +128,12 @@ export function Chat() {
               <button className="opacity-0 group-hover:opacity-100 text-muted hover:text-err" onClick={(e) => { e.stopPropagation(); deleteConversation(c.id); }} aria-label="Delete"><Trash2 size={14} /></button>
             </div>
           ))}
-          {!convs.length && <div className="text-xs text-muted px-2 py-4">Conversations are stored locally in your browser (IndexedDB).</div>}
+          {!convs.length && <div className="text-xs text-muted px-2 py-4">Conversations are stored only on this device (browser storage), never on the server.</div>}
+        </div>
+        <div className="p-2 border-t border-border grid gap-1 text-xs">
+          <div className="flex gap-1"><button className="btn btn-sm flex-1 justify-center" onClick={exportAll} title="Download all chats as a file you can keep or import on another PC"><Download size={13} /> Export</button><label className="btn btn-sm flex-1 justify-center cursor-pointer"><Upload size={13} /> Import<input type="file" accept="application/json" hidden onChange={(e) => importFile(e.target.files?.[0] ?? null)} /></label></div>
+          <button className="btn btn-sm justify-center text-err" onClick={deleteAll}><Trash2 size={13} /> Delete all chats</button>
+          <div className="text-muted">Auto-delete after {settings.autoDeleteDays > 0 ? `${settings.autoDeleteDays} days unused` : "never"} (change in Settings)</div>
         </div>
       </aside>
       <section className="flex-1 min-w-0 flex flex-col">

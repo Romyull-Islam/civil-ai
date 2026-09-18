@@ -8,10 +8,12 @@ export interface AppSettings {
   keys: KeyBag;
   preferences: { designCode?: string; units?: "SI" | "imperial"; region?: string; name?: string };
   theme: "dark" | "light" | "system";
+  /** delete conversations not opened for this many days (0 = keep forever) */
+  autoDeleteDays: number;
 }
 
 const KEY = "civil-ai.settings.v1";
-export const DEFAULT_SETTINGS: AppSettings = { provider: typeof window !== "undefined" && (window as unknown as { civilAI?: { desktop?: boolean } }).civilAI?.desktop ? "local-first" : "auto", keys: {}, preferences: { designCode: "IS 456 / IS 800", units: "SI" }, theme: "dark" };
+export const DEFAULT_SETTINGS: AppSettings = { provider: typeof window !== "undefined" && (window as unknown as { civilAI?: { desktop?: boolean } }).civilAI?.desktop ? "local-first" : "auto", keys: {}, preferences: { designCode: "IS 456 / IS 800", units: "SI" }, theme: "dark", autoDeleteDays: 30 };
 
 let cache: AppSettings | null = null;
 
