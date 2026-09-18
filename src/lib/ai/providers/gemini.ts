@@ -34,6 +34,7 @@ export const geminiProvider: Provider = {
     const toolCalls: ProviderTurn["toolCalls"] = [];
     let usage: ProviderTurn["usage"];
     let finish: string | undefined;
+    let looseSig: string | undefined;
     try {
       const stream = await ai.models.generateContentStream({
         model: req.model,
@@ -45,7 +46,8 @@ export const geminiProvider: Provider = {
         if (t) { text += t; req.onText(t); }
         for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
           const fc = part.functionCall;
-          if (!fc) continue;
+          // When streaming, the signature can arrive on a part of its own (before or after the call); keep it for the first call.
+          if (!fc) { if (part.thoughtSignature) looseSig ??= part.thoughtSignature; continue; }
           toolCalls.push({ id: fc.id ?? `call_${toolCalls.length}_${Date.now()}`, name: fc.name ?? "", args: (fc.args ?? {}) as Record<string, unknown>, ...(part.thoughtSignature ? { signature: part.thoughtSignature } : {}) });
         }
         if (chunk.usageMetadata) usage = { input: chunk.usageMetadata.promptTokenCount ?? 0, output: chunk.usageMetadata.candidatesTokenCount ?? 0 };
@@ -59,6 +61,7 @@ export const geminiProvider: Provider = {
       if (/fetch failed|ECONN|ENOTFOUND/i.test(msg)) throw new ProviderUnavailableError("Cannot reach Gemini API", "gemini", "network");
       throw e;
     }
+    if (looseSig && toolCalls[0] && !toolCalls.some((c) => c.signature)) toolCalls[0].signature = looseSig;
     const stop: ProviderTurn["stop"] = toolCalls.length ? "tool" : finish === "MAX_TOKENS" ? "length" : finish === "SAFETY" || finish === "PROHIBITED_CONTENT" ? "refusal" : "end";
     return { text, toolCalls, usage, stop, servedBy: req.model };
   },

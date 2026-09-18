@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { toContents, SKIP_SIGNATURE } from "@/lib/ai/providers/gemini";
-import type { ChatMessage } from "@/lib/ai/types";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import { runAgent } from "@/lib/ai/agent";
+import type { ChatMessage, AgentEvent } from "@/lib/ai/types";
 
 const call = (id: string, signature?: string) => ({ type: "tool_call" as const, id, name: "convert_units", args: { value: 100 }, ...(signature ? { signature } : {}) });
 
@@ -17,5 +20,41 @@ describe("gemini thought signatures", () => {
   it("leaves parallel calls alone when the first already has a real signature", () => {
     const [model] = toContents([{ role: "assistant", parts: [call("a", "real"), call("b")] }]);
     expect(model.parts?.map((p) => p.thoughtSignature)).toEqual(["real", undefined]);
+  });
+});
+
+/** Full agent round trip against a local mock of the Gemini streaming API. */
+async function roundTrip(firstChunks: object[]) {
+  const bodies: { contents: { role: string; parts: Record<string, unknown>[] }[] }[] = [];
+  const srv = http.createServer((req, res) => {
+    let b = "";
+    req.on("data", (c) => (b += c));
+    req.on("end", () => {
+      bodies.push(JSON.parse(b));
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      const chunks = bodies.length === 1 ? firstChunks : [{ candidates: [{ content: { role: "model", parts: [{ text: "done" }] }, finishReason: "STOP" }] }];
+      res.end(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join(""));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const { port } = srv.address() as AddressInfo;
+  const events: AgentEvent[] = [];
+  try {
+    await runAgent({ messages: [{ role: "user", parts: [{ type: "text", text: "convert 16 ft to m" }] }], provider: "gemini", model: "gemini-3.5-flash-lite", keys: { gemini: { apiKey: "test", baseUrl: `http://127.0.0.1:${port}` } }, emit: (e) => events.push(e) });
+  } finally { srv.close(); }
+  expect(events.some((e) => e.type === "error")).toBe(false);
+  expect(bodies).toHaveLength(2);
+  return bodies[1].contents.find((c) => c.role === "model")!.parts[0];
+}
+
+const fcChunk = (part: object) => ({ candidates: [{ content: { role: "model", parts: [{ functionCall: { name: "convert_units", args: { value: 16, from: "ft", to: "m" } }, ...part }] } }] });
+
+describe("gemini agent round trip", () => {
+  it("returns the signature on the next request", async () => {
+    expect((await roundTrip([fcChunk({ thoughtSignature: "REAL" })])).thoughtSignature).toBe("REAL");
+  });
+  it("picks up a signature streamed on a separate part", async () => {
+    const sigOnly = { candidates: [{ content: { role: "model", parts: [{ text: "", thoughtSignature: "LATE" }] }, finishReason: "STOP" }] };
+    expect((await roundTrip([fcChunk({}), sigOnly])).thoughtSignature).toBe("LATE");
   });
 });
