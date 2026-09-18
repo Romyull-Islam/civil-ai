@@ -12,6 +12,19 @@ import { type AgentEvent, type ChatMessage, type ContentPart, type Provider, Pro
 
 const MAX_ITERATIONS = 10;
 
+/** Turn raw provider errors (often nested JSON) into one readable line for the chat. */
+export function friendlyError(raw: string, provider?: string): string {
+  let msg = raw;
+  for (let i = 0; i < 3; i++) {
+    const m = /\{[\s\S]*\}/.exec(msg);
+    if (!m) break;
+    try { const j = JSON.parse(m[0]) as { error?: { message?: string } | string; message?: string }; const inner = typeof j.error === "string" ? j.error : j.error?.message ?? j.message; if (!inner || inner === msg) break; msg = inner; } catch { break; }
+  }
+  msg = msg.replace(/\s+/g, " ").trim();
+  if (msg.length > 220) msg = msg.slice(0, 220) + "…";
+  return `${provider ? `${provider}: ` : ""}${msg}`;
+}
+
 /** Rough token estimate (chars/4; images ~1,000). */
 function estimateTokens(msgs: ChatMessage[]): number {
   let n = 0;
@@ -136,7 +149,7 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
           emit({ type: "notice", message: `${PROVIDER_MAP.get(c.id)?.label ?? c.id} unavailable (${e.reason}); trying next provider…` });
           continue;
         }
-        emit({ type: "error", message: e instanceof Error ? e.message : String(e) });
+        emit({ type: "error", message: `The AI service returned an error — ${friendlyError(e instanceof Error ? e.message : String(e), PROVIDER_MAP.get(c.id)?.label)}. Try again or pick another model below.` });
         return;
       }
     }

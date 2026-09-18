@@ -6,6 +6,7 @@ export interface SessionInfo {
   user: { id: string; email: string; name: string; role: "superadmin" | "admin" | "support" | "user"; plan: string; planExpires: number | null; emailVerified: number } | null;
   plan?: { id: string; name: string; dailyRequests: number; features: string[]; vision: boolean; localAI?: boolean };
   allowedModels?: { provider: string; model: string }[];
+  upgradeModels?: { provider: string; model: string; plan: string; planId: string }[];
   usage?: { used: number; limit: number | null; remaining: number | null };
   renewal?: { status: "none" | "ok" | "expiring" | "grace" | "expired"; daysLeft: number | null };
   plans?: { id: string; name: string; priceMonthly: number; currency: string; dailyRequests: number; features: string[]; perSeat?: boolean; minSeats?: number }[];

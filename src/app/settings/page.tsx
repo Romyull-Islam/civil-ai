@@ -6,6 +6,8 @@ import { LocalAI } from "@/components/LocalAI";
 import { CloudAccount } from "@/components/CloudAccount";
 import { useSettings, saveSettings, type AppSettings } from "@/lib/client/settings";
 import { useSession } from "@/lib/client/session";
+import { db, type Conversation } from "@/lib/db";
+import { Download, Upload, Trash2 } from "lucide-react";
 
 export default function SettingsPage() {
   const s = useSettings();
@@ -16,6 +18,10 @@ export default function SettingsPage() {
   const [live, setLive] = useState<Record<string, string[] | string>>({});
   const [show, setShow] = useState<Record<string, boolean>>({});
   const [saved, setSaved] = useState(false);
+  const [dataMsg, setDataMsg] = useState<string | null>(null);
+  const exportAll = async () => { const rows = await db.conversations.toArray(); const blob = new Blob([JSON.stringify({ app: "civil-ai", version: 1, exportedAt: new Date().toISOString(), conversations: rows }, null, 1)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `civil-ai-chats-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setDataMsg(`Exported ${rows.length} chats.`); };
+  const importFile = async (f: File | null) => { if (!f) return; try { const j = JSON.parse(await f.text()) as { conversations?: Conversation[] }; if (!Array.isArray(j.conversations)) throw new Error("bad file"); await db.conversations.bulkPut(j.conversations); window.dispatchEvent(new Event("civil-ai:conversations")); setDataMsg(`Imported ${j.conversations.length} chats.`); } catch { setDataMsg("That file is not a Civil AI chat export."); } };
+  const deleteAll = async () => { if (!confirm("Delete all conversations stored on this device? This cannot be undone.")) return; await db.conversations.clear(); window.dispatchEvent(new Event("civil-ai:conversations")); setDataMsg("All chats on this device were deleted."); };
   useEffect(() => { fetch("/api/health").then((r) => r.json()).then((j) => setEnvConfigured(j.providersFromEnv ?? [])).catch(() => {}); }, []);
   const update = (patch: Partial<AppSettings>) => { saveSettings({ ...s, ...patch }); setSaved(true); setTimeout(() => setSaved(false), 1200); };
   const setKey = (id: string, patch: { apiKey?: string; baseUrl?: string; model?: string }) => update({ keys: { ...s.keys, [id]: { ...s.keys[id], ...patch } } });
@@ -89,6 +95,17 @@ export default function SettingsPage() {
             );
           })}
         </section>}
+
+        <section className="card p-4 grid gap-3">
+          <h2 className="font-medium">Data controls</h2>
+          <p className="text-xs text-muted">Chats are stored only in this browser/app. Export them to keep a copy or move them to another device; import restores them.{saas ? " Paid plans can also back up individual chats to their account (Cloud backups)." : ""}</p>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn btn-sm" onClick={exportAll}><Download size={14} /> Export all chats</button>
+            <label className="btn btn-sm cursor-pointer"><Upload size={14} /> Import chats<input type="file" accept="application/json" hidden onChange={(e) => importFile(e.target.files?.[0] ?? null)} /></label>
+            <button className="btn btn-sm text-err" onClick={deleteAll}><Trash2 size={14} /> Delete all chats</button>
+          </div>
+          {dataMsg && <div className="text-xs text-ok">{dataMsg}</div>}
+        </section>
 
         <section className="card p-4 grid gap-3">
           <h2 className="font-medium">Engineering preferences</h2>

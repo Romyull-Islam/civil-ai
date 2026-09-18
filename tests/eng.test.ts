@@ -8,9 +8,9 @@ import { averageEndArea, prismoidal, gridCutFill } from "@/lib/eng/earthwork";
 import { designSteelBeam } from "@/lib/eng/steel";
 import { searchCodes, COUNTRY_ORDER, countryOf } from "@/lib/eng/codes";
 import { evaluate } from "@/lib/eng/calc";
-import { runTool, selectToolsForText, TOOLS } from "@/lib/tools";
+import { runTool, selectToolsForText, TOOLS, toolJsonSchema } from "@/lib/tools";
 import { recommendModel, type Hardware } from "@/lib/local";
-import { stripLeakedReasoning, compactHistory } from "@/lib/ai/agent";
+import { stripLeakedReasoning, compactHistory, friendlyError } from "@/lib/ai/agent";
 import { planLayout, planBuilding } from "@/lib/eng/layout";
 import { toDxf } from "@/lib/drawing/dxf";
 import { toSvg } from "@/lib/drawing/svg";
@@ -281,5 +281,41 @@ describe("history compaction", () => {
     expect(c[0].role).toBe("user");
     expect(JSON.stringify(c).length).toBeLessThan(24000 * 4 * 1.2);
     expect(c[c.length - 1]).toEqual(long[long.length - 1]);
+  });
+});
+
+describe("tool schemas are portable across providers", () => {
+  // Gemini and Groq reject draft-7 tuples (items: [...]) and prefixItems; Gemini also rejects non-string enums.
+  const walk = (n: unknown, issues: string[], path: string) => {
+    if (Array.isArray(n)) { n.forEach((x, i) => walk(x, issues, `${path}[${i}]`)); return; }
+    if (!n || typeof n !== "object") return;
+    const o = n as Record<string, unknown>;
+    if (Array.isArray(o.items)) issues.push(`${path}: tuple items`);
+    if ("prefixItems" in o) issues.push(`${path}: prefixItems`);
+    for (const [k, v] of Object.entries(o)) walk(v, issues, `${path}.${k}`);
+  };
+  for (const flavor of ["openai", "gemini", "anthropic"] as const) {
+    it(`${flavor}: no tuple-style arrays in any tool`, () => {
+      const issues: string[] = [];
+      for (const t of TOOLS) walk(toolJsonSchema(t, flavor), issues, t.name);
+      expect(issues).toEqual([]);
+    });
+  }
+  it("gemini: enums are strings only", () => {
+    const bad: string[] = [];
+    const walkEnum = (n: unknown, p: string) => { if (Array.isArray(n)) return n.forEach((x, i) => walkEnum(x, `${p}[${i}]`)); if (!n || typeof n !== "object") return; const o = n as Record<string, unknown>; if (Array.isArray(o.enum) && o.enum.some((e) => typeof e !== "string")) bad.push(p); for (const [k, v] of Object.entries(o)) walkEnum(v, `${p}.${k}`); };
+    for (const t of TOOLS) walkEnum(toolJsonSchema(t, "gemini"), t.name);
+    expect(bad).toEqual([]);
+  });
+  it("coordinate pairs still validate as [x, y]", async () => {
+    const r = await runTool("draw_custom", { title: "t", entities: [{ type: "polyline", points: [[0, 0], [100, 0], [100, 50]], closed: true }] });
+    expect(r.error).toBeUndefined();
+  });
+});
+
+describe("friendly provider errors", () => {
+  it("unwraps nested JSON error messages", () => {
+    const raw = '{"error":{"message":"{\\n  \\"error\\": {\\n    \\"code\\": 400,\\n    \\"message\\": \\"schema must be a boolean or an object\\"\\n  }\\n}\\n","code":400}}';
+    expect(friendlyError(raw, "Google Gemini")).toBe("Google Gemini: schema must be a boolean or an object");
   });
 });

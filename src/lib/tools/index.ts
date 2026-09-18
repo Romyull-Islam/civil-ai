@@ -241,7 +241,7 @@ export const TOOLS: ToolDef[] = [
       bedrooms: z.number().int().min(0).max(8).default(2).describe("per dwelling unit"), bathrooms: z.number().int().min(0).max(6).optional(),
       unitsPerFloor: z.number().int().min(1).max(8).optional().describe("apartments"), shops: z.number().int().min(0).max(20).optional(),
       garage: z.boolean().default(false), dining: z.boolean().default(false), study: z.boolean().default(false), store: z.boolean().default(false),
-      windowsPerRoom: z.union([z.literal(1), z.literal(2)]).default(1),
+      windowsPerRoom: z.number().int().min(1).max(2).default(1).describe("windows per habitable room (1 or 2)"),
       wallThickness: z.number().default(230).describe("mm"), corridorWidth: z.number().default(1.2).describe("m"),
       maxCoveragePercent: z.number().optional(), maxFAR: z.number().optional(),
     }),
@@ -355,10 +355,32 @@ export function selectToolsForText(text: string): ToolDef[] {
 
 /** JSON schema for LLM function calling. `strict` removes formats Gemini rejects. */
 export function toolJsonSchema(t: ToolDef, flavor: "anthropic" | "openai" | "gemini" = "openai"): Record<string, unknown> {
-  const js = z.toJSONSchema(t.schema, { target: "draft-7", io: "input" }) as Record<string, unknown>;
+  const js = normalizeSchema(z.toJSONSchema(t.schema, { target: "draft-7", io: "input" })) as Record<string, unknown>;
   delete js.$schema;
   if (flavor === "gemini") return stripForGemini(js) as Record<string, unknown>;
   return js;
+}
+
+/**
+ * Make schemas portable across providers: draft-7 tuples (`items: [a, b]`) and `prefixItems` are rejected by Gemini and by
+ * Groq's 2020-12 validator, so turn them into a single `items` schema with a fixed length (e.g. [x, y] coordinate pairs).
+ */
+export function normalizeSchema(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(normalizeSchema);
+  if (!node || typeof node !== "object") return node;
+  const o = { ...(node as Record<string, unknown>) };
+  const tuple = Array.isArray(o.items) ? (o.items as unknown[]) : Array.isArray(o.prefixItems) ? (o.prefixItems as unknown[]) : null;
+  if (tuple) {
+    const parts = tuple.map(normalizeSchema);
+    const same = parts.every((p) => JSON.stringify(p) === JSON.stringify(parts[0]));
+    o.items = same ? parts[0] : { anyOf: parts };
+    o.minItems = o.minItems ?? parts.length;
+    o.maxItems = o.maxItems ?? parts.length;
+    delete o.prefixItems;
+    delete o.additionalItems;
+  }
+  for (const [k, v] of Object.entries(o)) if (k !== "items" || !tuple) o[k] = normalizeSchema(v);
+  return o;
 }
 
 function stripForGemini(node: unknown): unknown {
@@ -372,7 +394,9 @@ function stripForGemini(node: unknown): unknown {
       if (k === "prefixItems") { out.items = stripForGemini((v as unknown[])[0]); continue; }
       out[k] = stripForGemini(v);
     }
-    if (o.const !== undefined) { out.type = "string"; out.enum = [o.const]; }
+    // Gemini only supports enums of strings: keep string literals as a one-value enum, drop numeric/boolean literals to their type.
+    if (typeof o.const === "string") { out.type = "string"; out.enum = [o.const]; }
+    else if (o.const !== undefined && !out.type) out.type = typeof o.const === "number" ? "number" : "boolean";
     if (o.type === "integer") out.type = "integer";
     return out;
   }

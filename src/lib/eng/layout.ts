@@ -178,7 +178,7 @@ export interface BuildingInput {
   dining?: boolean;
   study?: boolean;
   store?: boolean;
-  windowsPerRoom?: 1 | 2;
+  windowsPerRoom?: number;
   wallThickness?: number; // mm
   corridorWidth?: number; // m
   maxCoveragePercent?: number;

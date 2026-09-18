@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
-import { Send, Square, Plus, Trash2, ImagePlus, X, Sparkles, Download, Upload, CloudUpload, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Send, Square, Trash2, ImagePlus, X, Sparkles, CloudUpload } from "lucide-react";
 import { db, type Conversation, type UIMessage } from "@/lib/db";
 import { useSettings } from "@/lib/client/settings";
 import { streamChat } from "@/lib/client/stream";
@@ -13,7 +13,6 @@ import { PROVIDERS } from "@/lib/ai/registry";
 import { LocalAI } from "./LocalAI";
 import { ModelPicker } from "./ModelPicker";
 import { useSession, refreshSession } from "@/lib/client/session";
-import { usePersistedFlag } from "@/lib/client/persist";
 
 const SUGGESTIONS = [
   "Design a 10\"×18\" (250×450 mm) RC beam, 16 ft span, 1.2 kip/ft factored load, 3000 psi concrete and Grade 60 steel per BNBC 2020, then draw the section.",
@@ -40,7 +39,6 @@ function titleFrom(text: string) { return text.replace(/\s+/g, " ").trim().slice
 export function Chat() {
   const settings = useSettings();
   const session = useSession();
-  const [convs, setConvs] = useState<Conversation[]>([]);
   const [conv, setConv] = useState<Conversation | null>(null);
   const [input, setInput] = useState("");
   const [images, setImages] = useState<{ mimeType: string; data: string; name: string }[]>([]);
@@ -50,26 +48,25 @@ export function Chat() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const refreshList = useCallback(() => { db.conversations.orderBy("updatedAt").reverse().limit(100).toArray().then((rows) => { setConvs(rows); window.dispatchEvent(new Event("civil-ai:conversations")); }); }, []);
+  const refreshList = useCallback(() => { window.dispatchEvent(new Event("civil-ai:conversations")); }, []);
   useEffect(() => {
-    let alive = true;
     const days = settings.autoDeleteDays;
     const cleanup = days > 0 ? db.conversations.where("updatedAt").below(now() - days * 86400000).delete() : Promise.resolve(0);
-    cleanup.catch(() => 0).then(() => db.conversations.orderBy("updatedAt").reverse().limit(200).toArray()).then((rows) => { if (alive) setConvs(rows); });
-    return () => { alive = false; };
+    cleanup.catch(() => 0).then((n) => { if (n) window.dispatchEvent(new Event("civil-ai:conversations")); });
   }, [settings.autoDeleteDays]);
+  // A chat deleted from the sidebar (or "delete all" in Settings) closes here too.
+  useEffect(() => {
+    const check = () => { const id = conv?.id; if (id) db.conversations.get(id).then((row) => { if (!row) setConv(null); }); };
+    window.addEventListener("civil-ai:conversations", check);
+    return () => window.removeEventListener("civil-ai:conversations", check);
+  }, [conv?.id]);
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
-  const [listHidden, toggleList] = usePersistedFlag("civil-ai.chatlist.hidden", false);
-  const listOpen = !listHidden;
   const backup = async (c: Conversation, silent = false) => {
     const r = await fetch("/api/saves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id, kind: "chat", title: c.title, payload: c }) });
     const j = await r.json();
     if (!silent) { setBackupMsg(r.ok ? "Backed up to your account." : j.error); setTimeout(() => setBackupMsg(null), 4000); }
     if (r.ok) refreshSession().catch(() => {});
   };
-  const deleteAll = async () => { if (!confirm("Delete all conversations stored on this device?")) return; await db.conversations.clear(); setConv(null); refreshList(); };
-  const exportAll = async () => { const rows = await db.conversations.toArray(); const blob = new Blob([JSON.stringify({ app: "civil-ai", version: 1, exportedAt: new Date().toISOString(), conversations: rows }, null, 1)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `civil-ai-chats-${new Date().toISOString().slice(0, 10)}.json`; a.click(); };
-  const importFile = async (f: File | null) => { if (!f) return; try { const j = JSON.parse(await f.text()) as { conversations?: Conversation[] }; if (!Array.isArray(j.conversations)) throw new Error("bad file"); await db.conversations.bulkPut(j.conversations); refreshList(); } catch { alert("Not a Civil AI chat export."); } };
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [conv?.messages.length, status]);
 
   const persist = useCallback(async (c: Conversation) => { await db.conversations.put(c); refreshList(); }, [refreshList]);
@@ -77,11 +74,9 @@ export function Chat() {
   useEffect(() => {
     const c = params.get("c"); const fresh = params.get("new");
     if (fresh) queueMicrotask(() => { setConv(null); setInput(""); setImages([]); router.replace("/"); });
-    else if (c) db.conversations.get(c).then((row) => { if (row) setConv(row); router.replace("/"); });
+    else if (c) db.conversations.get(c).then((row) => { if (row) { setConv(row); db.conversations.update(c, { updatedAt: now() }).catch(() => {}); } router.replace("/"); });
   }, [params, router]);
 
-  const newConversation = () => { setConv(null); setInput(""); setImages([]); };
-  const openConversation = async (id: string) => { const c = await db.conversations.get(id); if (c) { setConv(c); db.conversations.update(id, { updatedAt: now() }).catch(() => {}); } };
   const deleteConversation = async (id: string) => { await db.conversations.delete(id); if (conv?.id === id) setConv(null); refreshList(); };
 
   const addImages = async (files: FileList | null) => {
@@ -141,27 +136,15 @@ export function Chat() {
 
   return (
     <div className="flex h-full min-h-0">
-      <aside className={`${listOpen ? "hidden lg:flex w-64" : "hidden"} shrink-0 flex-col border-r border-border`}>
-        <div className="p-2 flex gap-1"><button className="btn flex-1 justify-center" onClick={newConversation}><Plus size={16} /> New chat</button><button className="btn" onClick={toggleList} title="Hide chat history"><PanelLeftClose size={16} /></button></div>
-        <div className="flex-1 overflow-y-auto px-2 pb-2 grid content-start gap-1">
-          {convs.map((c) => (
-            <div key={c.id} className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm cursor-pointer ${conv?.id === c.id ? "bg-elev2" : "hover:bg-elev2"}`} onClick={() => openConversation(c.id)}>
-              <span className="truncate flex-1">{c.title}</span>
-              {session?.mode === "saas" && (session.cloudQuota?.limitBytes ?? 0) > 0 && <button className="opacity-0 group-hover:opacity-100 text-muted hover:text-accent2" onClick={(e) => { e.stopPropagation(); backup(c); }} aria-label="Back up to cloud" title="Back up to my account"><CloudUpload size={14} /></button>}
-              <button className="opacity-0 group-hover:opacity-100 text-muted hover:text-err" onClick={(e) => { e.stopPropagation(); deleteConversation(c.id); }} aria-label="Delete"><Trash2 size={14} /></button>
-            </div>
-          ))}
-          {!convs.length && <div className="text-xs text-muted px-2 py-4">Conversations are stored only on this device (browser storage), never on the server.</div>}
-        </div>
-        <div className="p-2 border-t border-border grid gap-1 text-xs">
-          <div className="flex gap-1"><button className="btn btn-sm flex-1 justify-center" onClick={exportAll} title="Download all chats as a file you can keep or import on another PC"><Download size={13} /> Export</button><label className="btn btn-sm flex-1 justify-center cursor-pointer"><Upload size={13} /> Import<input type="file" accept="application/json" hidden onChange={(e) => importFile(e.target.files?.[0] ?? null)} /></label></div>
-          <button className="btn btn-sm justify-center text-err" onClick={deleteAll}><Trash2 size={13} /> Delete all chats</button>
-          {backupMsg && <div className="text-ok">{backupMsg}</div>}
-          <div className="text-muted">Auto-delete after {settings.autoDeleteDays > 0 ? `${settings.autoDeleteDays} days unused` : "never"} (change in Settings)</div>
-        </div>
-      </aside>
       <section className="flex-1 min-w-0 flex flex-col relative">
-        {!listOpen && <button className="hidden lg:flex absolute top-2 left-2 z-10 btn btn-sm" onClick={toggleList} title="Show chat history"><PanelLeftOpen size={15} /> History</button>}
+        {conv && (
+          <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
+            <div className="font-medium text-sm truncate flex-1" title={conv.title}>{conv.title}</div>
+            {backupMsg && <span className="text-xs text-ok">{backupMsg}</span>}
+            {session?.mode === "saas" && (session.cloudQuota?.limitBytes ?? 0) > 0 && <button className="btn btn-sm" onClick={() => backup(conv)} title="Back up this chat to my account"><CloudUpload size={14} /> <span className="hidden sm:inline">Back up</span></button>}
+            <button className="btn btn-sm" onClick={() => { if (confirm("Delete this conversation?")) deleteConversation(conv.id); }} title="Delete this chat"><Trash2 size={14} /></button>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto px-4 py-6 grid gap-4">
             {!conv && (

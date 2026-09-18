@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { MessageSquare, Calculator, PencilRuler, BookOpen, Settings, HardHat, Menu, X, Shield, User, CreditCard, LifeBuoy, Users, Cloud, ChevronsLeft, ChevronsRight, Plus, LogOut, BarChart3, ChevronUp, Sparkles } from "lucide-react";
+import { MessageSquare, Calculator, PencilRuler, BookOpen, Settings, HardHat, Menu, X, Shield, User, CreditCard, LifeBuoy, Users, Cloud, ChevronsLeft, ChevronsRight, Plus, LogOut, BarChart3, ChevronUp, Sparkles, Trash2 } from "lucide-react";
 import { useSettings } from "@/lib/client/settings";
 import { useSession, logoutClient } from "@/lib/client/session";
 import { usePersistedFlag } from "@/lib/client/persist";
@@ -33,7 +33,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
   }, [settings.theme]);
   useEffect(() => {
-    const load = () => db.conversations.orderBy("updatedAt").reverse().limit(6).toArray().then((rows) => setRecents(rows.map((r) => ({ id: r.id, title: r.title })))).catch(() => {});
+    const load = () => db.conversations.orderBy("updatedAt").reverse().limit(50).toArray().then((rows) => setRecents(rows.map((r) => ({ id: r.id, title: r.title })))).catch(() => {});
     load();
     window.addEventListener("civil-ai:conversations", load);
     return () => window.removeEventListener("civil-ai:conversations", load);
@@ -81,13 +81,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <nav className="flex flex-col gap-0.5 p-2">
           {MAIN.map(({ href, label, icon }) => navLink(href, label, icon, href === "/" ? path === "/" : path.startsWith(href)))}
         </nav>
-        {!collapsed && recents.length > 0 && (
-          <div className="px-2 mt-2 min-h-0 overflow-y-auto">
+        {!collapsed && (
+          <div className="px-2 mt-2 flex-1 min-h-0 flex flex-col">
             <div className="label px-3 mb-1">Recents</div>
-            {recents.map((r) => <Link key={r.id} href={`/?c=${r.id}`} onClick={() => setOpen(false)} className="block truncate rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-elev2 hover:text-fg" title={r.title}>{r.title}</Link>)}
+            <div className="overflow-y-auto min-h-0 flex-1">
+              {recents.map((r) => (
+                <div key={r.id} className="group flex items-center rounded-lg hover:bg-elev2">
+                  <Link href={`/?c=${r.id}`} onClick={() => setOpen(false)} className="flex-1 truncate px-3 py-1.5 text-sm text-muted group-hover:text-fg" title={r.title}>{r.title}</Link>
+                  <button className="opacity-0 group-hover:opacity-100 px-2 text-muted hover:text-err" title="Delete chat" onClick={async () => { if (!confirm(`Delete "${r.title}"?`)) return; await db.conversations.delete(r.id); window.dispatchEvent(new Event("civil-ai:conversations")); }}><Trash2 size={13} /></button>
+                </div>
+              ))}
+              {!recents.length && <div className="px-3 py-1 text-xs text-muted">Your chats appear here. They are stored on this device only.</div>}
+            </div>
           </div>
         )}
-        <div className="mt-auto p-2 relative" ref={menuRef}>
+        <div className={`${collapsed ? "mt-auto" : ""} p-2 relative border-t border-border`} ref={menuRef}>
           {collapsed && <button className="w-full flex justify-center py-2 text-muted hover:text-fg" onClick={toggleCollapsed} title="Expand menu"><ChevronsRight size={16} /></button>}
           {menu && (
             <div className="absolute bottom-full left-2 right-2 mb-1 card p-1 shadow-xl z-50 min-w-56">
@@ -99,7 +107,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )}
           <button className={`w-full flex items-center gap-3 rounded-lg ${collapsed ? "justify-center px-0" : "px-2"} py-2 hover:bg-elev2 text-left`} onClick={() => setMenu((v) => !v)} title="Account menu">
             <Avatar src={session?.avatar} />
-            {!collapsed && <div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{user ? (user.name || user.email.split("@")[0]) : saas ? "Sign in" : "You"}</div><div className="text-[11px] text-muted truncate">{user ? `${planName} plan` : saas ? "Free to start" : planName}</div></div>}
+            {!collapsed && <div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{user ? (user.name || user.email.split("@")[0]) : saas ? "Sign in" : "You"}</div><div className="text-[11px] text-muted truncate">{user ? (user.role !== "user" ? `${user.role[0].toUpperCase()}${user.role.slice(1)} · ${planName} plan` : `${planName} plan`) : saas ? "Free to start" : planName}</div></div>}
             {!collapsed && <ChevronUp size={14} className={`text-muted transition ${menu ? "rotate-180" : ""}`} />}
           </button>
         </div>

@@ -1,30 +1,119 @@
 "use client";
-import { useEffect, useState } from "react";
-import { Shield, KeyRound, Users, BarChart3, Layers, Save, RefreshCw, Wallet, LifeBuoy, Globe } from "lucide-react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { Shield, KeyRound, Users, BarChart3, Layers, Save, RefreshCw, Wallet, LifeBuoy, Globe, LayoutDashboard, UsersRound, CreditCard, ExternalLink, CheckCircle2, Circle } from "lucide-react";
+import { friendlyModel, TIER_LABEL } from "@/lib/ai/friendly";
 import type { SiteSettings } from "@/lib/saas/site";
 import { PROVIDERS } from "@/lib/ai/registry";
 import { DEFAULT_PLANS } from "@/lib/saas/plans";
 import { useSession } from "@/lib/client/session";
 import type { Plan } from "@/lib/saas/plans";
 
-type Tab = "users" | "keys" | "plans" | "usage" | "payments" | "support" | "site" | "gateways" | "teams";
+type Tab = "overview" | "users" | "keys" | "plans" | "usage" | "payments" | "support" | "site" | "gateways" | "teams";
 type Role = "superadmin" | "admin" | "support" | "user";
 interface AdminUser { id: string; email: string; name: string; role: Role; plan: string; planExpires: number | null; createdAt: number; disabled: number }
-const TAB_ROLES: Record<Tab, Role[]> = { gateways: ["superadmin", "admin"], teams: ["superadmin", "admin", "support"], users: ["superadmin", "admin", "support"], payments: ["superadmin", "admin", "support"], support: ["superadmin", "admin", "support"], keys: ["superadmin", "admin"], plans: ["superadmin", "admin"], site: ["superadmin", "admin"], usage: ["superadmin", "admin"] };
+const TAB_ROLES: Record<Tab, Role[]> = { overview: ["superadmin", "admin", "support"], gateways: ["superadmin", "admin"], teams: ["superadmin", "admin", "support"], users: ["superadmin", "admin", "support"], payments: ["superadmin", "admin", "support"], support: ["superadmin", "admin", "support"], keys: ["superadmin", "admin"], plans: ["superadmin", "admin"], site: ["superadmin", "admin"], usage: ["superadmin", "admin"] };
+const GROUPS: { title: string; items: [Tab, typeof Users, string][] }[] = [
+  { title: "", items: [["overview", LayoutDashboard, "Overview"]] },
+  { title: "Customers", items: [["users", Users, "Users & plans"], ["payments", Wallet, "Payments"], ["support", LifeBuoy, "Support tickets"], ["teams", UsersRound, "Teams"]] },
+  { title: "Service setup", items: [["plans", Layers, "Plans & models"], ["keys", KeyRound, "AI provider keys"], ["gateways", CreditCard, "Payment gateways"], ["site", Globe, "Site, contacts & legal"]] },
+  { title: "Reports", items: [["usage", BarChart3, "Usage"]] },
+];
+const PREVIEWS: [string, string][] = [["/pricing", "Plans page"], ["/subscribe", "Checkout page"], ["/help", "Help & FAQ"], ["/terms", "Terms"], ["/privacy", "Privacy"], ["/refund-policy", "Refund policy"], ["/", "Assistant"]];
+function PreviewLinks({ only }: { only?: string[] }) {
+  return <div className="flex flex-wrap gap-2 items-center text-xs"><span className="text-muted">View as a customer:</span>{PREVIEWS.filter(([h]) => !only || only.includes(h)).map(([href, label]) => <a key={href} href={href} target="_blank" rel="noreferrer" className="btn btn-sm"><ExternalLink size={12} /> {label}</a>)}</div>;
+}
+
+const subscribeHash = (cb: () => void) => { window.addEventListener("hashchange", cb); return () => window.removeEventListener("hashchange", cb); };
+function useHashTab(): [Tab, (t: Tab) => void] {
+  const raw = useSyncExternalStore(subscribeHash, () => window.location.hash.slice(1), () => "");
+  const tab = (Object.keys(TAB_ROLES) as Tab[]).includes(raw as Tab) ? (raw as Tab) : "overview";
+  return [tab, (t: Tab) => { window.location.hash = t; }];
+}
 
 export default function AdminPage() {
   const s = useSession();
-  const [tab, setTab] = useState<Tab>("users");
+  const [tab, setTab] = useHashTab();
+  const [badges, setBadges] = useState<{ payments?: number; support?: number }>({});
+  useEffect(() => { fetch("/api/admin/overview").then((r) => (r.ok ? r.json() : null)).then((j) => j && setBadges({ payments: j.counts.pendingPayments, support: j.counts.openTickets })).catch(() => {}); }, [tab]);
   if (!s) return <div className="p-6 text-sm text-muted">Loading…</div>;
   const role = s.user?.role ?? "user";
   if (s.mode !== "saas" || role === "user") return <div className="p-6 text-sm text-err">Staff access only.</div>;
-  const tabs = ([["users", Users, "Users & subscriptions"], ["teams", Users, "Teams"], ["payments", Wallet, "Payments"], ["support", LifeBuoy, "Support tickets"], ["keys", KeyRound, "Provider API keys"], ["gateways", Wallet, "Payment gateways"], ["plans", Layers, "Plans"], ["site", Globe, "Site & payment settings"], ["usage", BarChart3, "Usage"]] as const).filter(([id]) => TAB_ROLES[id].includes(role));
+  const allowed = (t: Tab) => TAB_ROLES[t].includes(role);
+  const current = allowed(tab) ? tab : "overview";
   return (
-    <div className="h-full overflow-y-auto"><div className="max-w-6xl mx-auto p-4 grid gap-4">
-      <div className="flex items-center gap-2"><Shield className="text-accent" /><h1 className="text-lg font-semibold">{role === "support" ? "Helpdesk" : "Admin"}</h1><span className="badge">{role}</span></div>
-      <div className="flex gap-2 flex-wrap">{tabs.map(([id, Icon, label]) => <button key={id} className={`btn btn-sm ${tab === id ? "btn-primary" : ""}`} onClick={() => setTab(id)}><Icon size={14} /> {label}</button>)}</div>
-      {tab === "users" && <UsersTab me={s.user!} />}{tab === "teams" && <TeamsTab />}{tab === "payments" && <PaymentsTab />}{tab === "support" && <SupportTab />}{tab === "keys" && <KeysTab />}{tab === "gateways" && <GatewaysTab />}{tab === "plans" && <PlansTab />}{tab === "site" && <SiteTab />}{tab === "usage" && <UsageTab />}
-    </div></div>
+    <div className="h-full flex min-h-0">
+      <nav className="hidden md:flex w-56 shrink-0 flex-col gap-3 border-r border-border p-3 overflow-y-auto">
+        <div className="flex items-center gap-2 px-2"><Shield size={18} className="text-accent" /><span className="font-semibold">{role === "support" ? "Helpdesk" : "Admin"}</span><span className="badge ml-auto">{role}</span></div>
+        {GROUPS.map((g) => { const items = g.items.filter(([id]) => allowed(id)); if (!items.length) return null; return (
+          <div key={g.title} className="grid gap-0.5">
+            {g.title && <div className="label px-2 pt-1">{g.title}</div>}
+            {items.map(([id, Icon, label]) => { const n = id === "payments" ? badges.payments : id === "support" ? badges.support : 0; return (
+              <button key={id} onClick={() => setTab(id)} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-left ${current === id ? "bg-elev2 text-fg font-medium" : "text-muted hover:bg-elev2 hover:text-fg"}`}><Icon size={15} /> <span className="flex-1">{label}</span>{n ? <span className="rounded-full bg-accent text-accent-fg text-[11px] px-1.5">{n}</span> : null}</button>); })}
+          </div>); })}
+      </nav>
+      <div className="flex-1 min-w-0 overflow-y-auto"><div className="max-w-6xl mx-auto p-4 grid gap-4">
+        <select className="select md:hidden" value={current} onChange={(e) => setTab(e.target.value as Tab)}>{GROUPS.flatMap((g) => g.items).filter(([id]) => allowed(id)).map(([id, , label]) => <option key={id} value={id}>{label}</option>)}</select>
+        {current === "overview" && <OverviewTab go={setTab} admin={role !== "support"} />}
+        {current === "users" && <UsersTab me={s.user!} />}{current === "teams" && <TeamsTab />}{current === "payments" && <PaymentsTab />}{current === "support" && <SupportTab />}{current === "keys" && <KeysTab />}{current === "gateways" && <GatewaysTab />}{current === "plans" && <PlansTab />}{current === "site" && <SiteTab />}{current === "usage" && <UsageTab />}
+      </div></div>
+    </div>
+  );
+}
+
+interface Overview {
+  counts: { users: number; paidUsers: number; newThisWeek: number; pendingPayments: number; openTickets: number; requestsToday: number; requests7d: number; cloudMB: number; cloudCapMB: number };
+  checklist?: { id: string; ok: boolean; title: string; detail: string; tab: string }[];
+  planSummary?: { id: string; name: string; price: number; currency: string; dailyRequests: number; perSeat: boolean; localAI: boolean; cloudMB: number; models: { provider: string; model: string; name: string; tier: string; hasKey: boolean }[] }[];
+}
+function OverviewTab({ go, admin }: { go: (t: Tab) => void; admin: boolean }) {
+  const [o, setO] = useState<Overview | null>(null);
+  useEffect(() => { fetch("/api/admin/overview").then((r) => r.json()).then(setO); }, []);
+  if (!o) return <div className="text-sm text-muted">Loading…</div>;
+  const c = o.counts;
+  const card = (label: string, value: string | number, hint?: string, tab?: Tab, alert?: boolean) => (
+    <button onClick={() => tab && go(tab)} className={`card p-4 text-left ${tab ? "hover:border-accent2" : "cursor-default"} ${alert ? "border-accent" : ""}`}>
+      <div className="text-xs text-muted">{label}</div><div className="text-2xl font-semibold mt-1">{value}</div>{hint && <div className="text-xs text-muted mt-0.5">{hint}</div>}
+    </button>
+  );
+  const todo = o.checklist?.filter((x) => !x.ok) ?? [];
+  return (
+    <div className="grid gap-5">
+      <div><h1 className="text-lg font-semibold">Overview</h1><p className="text-sm text-muted">What needs attention today, and whether the service is fully set up.</p></div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {card("Payments to verify", c.pendingPayments, c.pendingPayments ? "Approve or reject" : "All done", "payments", c.pendingPayments > 0)}
+        {card("Open support tickets", c.openTickets, c.openTickets ? "Waiting for a reply" : "All answered", "support", c.openTickets > 0)}
+        {card("Paying customers", c.paidUsers, `${c.users} accounts · ${c.newThisWeek} new this week`, "users")}
+        {card("AI requests", c.requestsToday, `today · ${c.requests7d} in 7 days`, admin ? "usage" : undefined)}
+      </div>
+      {admin && o.checklist && (
+        <div className="card p-4 grid gap-2">
+          <div className="flex items-center gap-2"><h2 className="font-medium">Setup checklist</h2><span className="text-xs text-muted">{o.checklist.length - todo.length} of {o.checklist.length} done</span></div>
+          {o.checklist.map((x) => (
+            <div key={x.id} className="flex items-start gap-3 text-sm border-t border-border pt-2">
+              {x.ok ? <CheckCircle2 size={18} className="text-ok shrink-0 mt-0.5" /> : <Circle size={18} className="text-accent shrink-0 mt-0.5" />}
+              <div className="flex-1 min-w-0"><div className={x.ok ? "text-muted" : "font-medium"}>{x.title}</div><div className="text-xs text-muted break-words">{x.detail}</div></div>
+              {!x.ok && (x.tab === "account" ? <a className="btn btn-sm" href="/account">Set up</a> : <button className="btn btn-sm" onClick={() => go(x.tab as Tab)}>Fix</button>)}
+            </div>
+          ))}
+        </div>
+      )}
+      {admin && o.planSummary && (
+        <div className="card p-4 grid gap-3">
+          <div className="flex items-center gap-2"><h2 className="font-medium">What each plan offers</h2><button className="btn btn-sm ml-auto" onClick={() => go("plans")}>Edit plans & models</button></div>
+          <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
+            {o.planSummary.map((p) => (
+              <div key={p.id} className="border border-border rounded-lg p-3 text-sm grid gap-1 content-start">
+                <div className="font-medium">{p.name} <span className="text-muted font-normal">{p.price ? `${p.currency === "BDT" ? "৳" : p.currency + " "}${p.price}${p.perSeat ? "/user" : ""}` : "free"}</span></div>
+                <div className="text-xs text-muted">{p.dailyRequests} requests/day · backups {p.cloudMB ? `${p.cloudMB} MB` : "none"} · offline model {p.localAI ? "yes" : "no"}</div>
+                <ul className="grid gap-0.5 mt-1">{p.models.map((m) => <li key={m.provider + m.model} className="flex items-center gap-1.5 text-xs"><span className={m.hasKey ? "" : "text-err line-through"}>{m.name}</span><span className="text-muted">{m.tier}</span>{!m.hasKey && <span className="text-err">no key</span>}</li>)}{!p.models.length && <li className="text-xs text-err">No models selected</li>}</ul>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-muted">Users see these names in the model chooser under the chat box, plus &quot;Auto&quot;. Models marked &quot;no key&quot; are skipped until you add that provider&apos;s key.</p>
+        </div>
+      )}
+      <div className="card p-4 grid gap-2"><h2 className="font-medium">Check the customer view</h2><p className="text-xs text-muted">Opens in a new tab exactly as customers see it (you stay signed in as staff).</p><PreviewLinks /></div>
+    </div>
   );
 }
 
@@ -132,7 +221,7 @@ function PlansTab() {
               {PROVIDERS.filter((pr) => pr.id !== "local" && pr.id !== "ollama").map((pr) => (
                 <div key={pr.id} className="border border-border rounded-lg p-2">
                   <div className="text-xs font-medium flex items-center gap-2">{pr.label}{keys[pr.id] && !(keys[pr.id].set || keys[pr.id].fromEnv) && <span className="text-err">no key</span>}</div>
-                  {pr.models.map((m) => <label key={m.id} className="flex items-center gap-1 text-xs mt-1"><input type="checkbox" checked={!!p.providers.find((x) => x.provider === pr.id)?.models.includes(m.id)} onChange={() => toggleModel(i, pr.id, m.id)} /> {m.label}{m.note ? <span className="text-muted"> — {m.note}</span> : null}</label>)}
+                  {pr.models.map((m) => { const f = friendlyModel(pr.id, m.id, m.label); return <label key={m.id} className="flex items-center gap-1 text-xs mt-1"><input type="checkbox" checked={!!p.providers.find((x) => x.provider === pr.id)?.models.includes(m.id)} onChange={() => toggleModel(i, pr.id, m.id)} /> {f.name} <span className="text-muted">({TIER_LABEL[f.tier]}{m.free ? ", free tier" : ""})</span></label>; })}
                 </div>
               ))}
             </div>
@@ -204,7 +293,7 @@ function SupportTab() {
 // eslint-disable-next-line @next/next/no-img-element
 const QrPreview = ({ src }: { src: string }) => <img src={src} alt="QR" className="h-20 rounded border border-border bg-white p-1" />;
 
-function SiteTab() {
+function SiteTabInner() {
   const [site, setSite] = useState<SiteSettings | null>(null); const [emailOk, setEmailOk] = useState(false); const [saved, setSaved] = useState(false); const [err, setErr] = useState<string | null>(null);
   useEffect(() => { fetch("/api/admin/site").then((r) => r.json()).then((j) => { setSite(j.site); setEmailOk(!!j.emailConfigured); }); }, []);
   if (!site) return <div className="text-sm text-muted">Loading…</div>;
@@ -251,7 +340,7 @@ function SiteTab() {
   );
 }
 
-function GatewaysTab() {
+function GatewaysTabInner() {
   interface GW { id: string; label: string; methods: string; docs: string; fields: { key: string; label: string; secret?: boolean; placeholder?: string }[]; enabled: boolean; sandbox: boolean; fromEnv?: boolean; values: Record<string, string> }
   const [list, setList] = useState<GW[]>([]); const [draft, setDraft] = useState<Record<string, Partial<GW>>>({}); const [msg, setMsg] = useState<string | null>(null);
   const load = () => fetch("/api/admin/gateways").then((r) => r.json()).then((j) => setList(j.gateways ?? []));
@@ -304,3 +393,6 @@ function TeamsTab() {
     </div>
   );
 }
+
+function SiteTab() { return <div className="grid gap-3"><PreviewLinks only={["/help", "/terms", "/privacy", "/refund-policy", "/subscribe"]} /><SiteTabInner /></div>; }
+function GatewaysTab() { return <div className="grid gap-3"><PreviewLinks only={["/subscribe", "/pricing"]} /><GatewaysTabInner /></div>; }
