@@ -173,7 +173,7 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
 
     const assistantParts: ChatMessage["parts"] = [];
     if (turn.text) assistantParts.push({ type: "text", text: turn.text });
-    for (const c of turn.toolCalls) assistantParts.push({ type: "tool_call", id: c.id, name: c.name, args: c.args });
+    for (const c of turn.toolCalls) assistantParts.push({ type: "tool_call", id: c.id, name: c.name, args: c.args, ...(c.signature ? { signature: c.signature } : {}) });
     if (assistantParts.length) messages.push({ role: "assistant", parts: assistantParts });
 
     // Some local/OpenAI-compatible backends return an empty turn right after tool results; nudge once to continue.

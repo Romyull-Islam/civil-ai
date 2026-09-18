@@ -2,14 +2,17 @@ import { GoogleGenAI, type Content, type Part, type FunctionDeclaration } from "
 import { toolJsonSchema } from "@/lib/tools";
 import { ProviderRequest, ProviderTurn, Provider, ProviderUnavailableError, ChatMessage } from "../types";
 
-function toContents(messages: ChatMessage[]): Content[] {
+export function toContents(messages: ChatMessage[]): Content[] {
   const out: Content[] = [];
   for (const m of messages) {
     if (m.role === "user") {
       const parts = m.parts.flatMap<Part>((p) => p.type === "text" ? [{ text: p.text }] : p.type === "image" ? [{ inlineData: { mimeType: p.mimeType, data: p.data } }] : []);
       out.push({ role: "user", parts: parts.length ? parts : [{ text: "(empty)" }] });
     } else if (m.role === "assistant") {
-      const parts = m.parts.flatMap<Part>((p) => p.type === "text" && p.text.trim() ? [{ text: p.text }] : p.type === "tool_call" ? [{ functionCall: { id: p.id, name: p.name, args: p.args } }] : []);
+      const parts = m.parts.flatMap<Part>((p) => p.type === "text" && p.text.trim() ? [{ text: p.text }] : p.type === "tool_call" ? [{ functionCall: { id: p.id, name: p.name, args: p.args }, ...(p.signature ? { thoughtSignature: p.signature } : {}) }] : []);
+      // Gemini 3 rejects a step whose first function call has no thought signature (e.g. history from another provider). Google's documented placeholder skips the check.
+      const firstCall = parts.find((p) => p.functionCall);
+      if (firstCall && !parts.some((p) => p.functionCall && p.thoughtSignature)) firstCall.thoughtSignature = SKIP_SIGNATURE;
       if (parts.length) out.push({ role: "model", parts });
     } else {
       const parts: Part[] = m.parts.flatMap((p) => p.type === "tool_result" ? [{ functionResponse: { id: p.id, name: p.name, response: p.isError ? { error: p.content } : { result: safeJson(p.content) } } }] : []);
@@ -18,6 +21,8 @@ function toContents(messages: ChatMessage[]): Content[] {
   }
   return out;
 }
+
+export const SKIP_SIGNATURE = "skip_thought_signature_validator";
 
 const safeJson = (s: string): unknown => { try { return JSON.parse(s); } catch { return s; } };
 
@@ -38,8 +43,10 @@ export const geminiProvider: Provider = {
       for await (const chunk of stream) {
         const t = chunk.text;
         if (t) { text += t; req.onText(t); }
-        for (const fc of chunk.functionCalls ?? []) {
-          toolCalls.push({ id: fc.id ?? `call_${toolCalls.length}_${Date.now()}`, name: fc.name ?? "", args: (fc.args ?? {}) as Record<string, unknown> });
+        for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
+          const fc = part.functionCall;
+          if (!fc) continue;
+          toolCalls.push({ id: fc.id ?? `call_${toolCalls.length}_${Date.now()}`, name: fc.name ?? "", args: (fc.args ?? {}) as Record<string, unknown>, ...(part.thoughtSignature ? { signature: part.thoughtSignature } : {}) });
         }
         if (chunk.usageMetadata) usage = { input: chunk.usageMetadata.promptTokenCount ?? 0, output: chunk.usageMetadata.candidatesTokenCount ?? 0 };
         finish = chunk.candidates?.[0]?.finishReason ?? finish;

@@ -3,7 +3,7 @@ import type { ToolDef, ToolOutput } from "@/lib/tools";
 export type ContentPart =
   | { type: "text"; text: string }
   | { type: "image"; mimeType: string; data: string /* base64 */ }
-  | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
+  | { type: "tool_call"; id: string; name: string; args: Record<string, unknown>; /** opaque provider token (Gemini thought signature) that must be echoed back */ signature?: string }
   | { type: "tool_result"; id: string; name: string; content: string; isError?: boolean };
 
 export interface ChatMessage { role: "user" | "assistant" | "tool"; parts: ContentPart[] }
@@ -20,7 +20,7 @@ export interface ProviderRequest {
   maxTokens?: number;
 }
 
-export interface ToolCall { id: string; name: string; args: Record<string, unknown> }
+export interface ToolCall { id: string; name: string; args: Record<string, unknown>; signature?: string }
 
 export interface ProviderTurn {
   text: string;
