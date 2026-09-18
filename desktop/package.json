@@ -1,0 +1,34 @@
+{
+  "name": "civil-ai-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Civil AI — desktop shell (Electron) that runs the bundled Next.js server locally",
+  "main": "main.js",
+  "author": "Civil AI",
+  "license": "MIT",
+  "scripts": {
+    "prepare-app": "node scripts/prepare-app.js",
+    "start": "electron .",
+    "dev": "cross-env CIVIL_AI_DEV_URL=http://localhost:3000 electron .",
+    "dist": "npm run prepare-app && electron-builder",
+    "dist:linux": "npm run prepare-app && electron-builder --linux AppImage deb",
+    "dist:win": "npm run prepare-app && electron-builder --win nsis",
+    "dist:mac": "npm run prepare-app && electron-builder --mac dmg"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "ai.civil.desktop",
+    "productName": "Civil AI",
+    "directories": { "output": "release" },
+    "files": ["main.js", "preload.js", "icon.png"],
+    "extraResources": [{ "from": "app", "to": "app" }],
+    "asar": true,
+    "linux": { "target": ["AppImage", "deb"], "category": "Engineering" },
+    "win": { "target": ["nsis"] },
+    "mac": { "target": ["dmg"], "category": "public.app-category.productivity" }
+  }
+}

@@ -1,0 +1,50 @@
+# Render Blueprint: free web service + free Postgres. Deploy: New → Blueprint → select this repo.
+services:
+  - type: web
+    name: civil-ai
+    runtime: node
+    plan: free
+    rootDir: civil-ai
+    buildCommand: npm ci && npm run build && cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/
+    startCommand: node .next/standalone/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CIVIL_AI_MODE
+        value: saas
+      - key: CIVIL_AI_LOCAL_AI
+        value: "0"
+      - key: HOSTNAME
+        value: 0.0.0.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: civil-ai-db
+          property: connectionString
+      - key: CIVIL_AI_SECRET
+        generateValue: true
+      - key: CRON_SECRET
+        generateValue: true
+      - key: PAYMENT_WEBHOOK_SECRET
+        generateValue: true
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: NEXT_PUBLIC_APP_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+databases:
+  - name: civil-ai-db
+    plan: free

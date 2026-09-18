@@ -1,0 +1,13 @@
+import { appMode } from "@/lib/saas/mode";
+import { signup, sessionCookie, publicUser } from "@/lib/saas/service";
+import { rateLimit, clientIp } from "@/lib/saas/security";
+export const runtime = "nodejs";
+export async function POST(req: Request) {
+  if (appMode() !== "saas") return Response.json({ error: "Accounts are only used in SaaS mode" }, { status: 400 });
+  if (!rateLimit(`signup:${clientIp(req)}`, 10, 3600000)) return Response.json({ error: "Too many sign-ups from this network, try later" }, { status: 429 });
+  try {
+    const { email, password, name } = (await req.json()) as { email: string; password: string; name?: string };
+    const { user, token } = await signup(email, password, name);
+    return new Response(JSON.stringify({ user: publicUser(user), token }), { status: 201, headers: { "Content-Type": "application/json", "Set-Cookie": sessionCookie(token) } });
+  } catch (e) { return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 }); }
+}

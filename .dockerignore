@@ -1,0 +1,7 @@
+node_modules
+.next
+desktop/node_modules
+desktop/app
+desktop/release
+docs
+*.md

@@ -1,0 +1,474 @@
+[
+  {
+    "provider": "local",
+    "model": "qwen3.5-4b",
+    "served": "local/qwen3.5-4b",
+    "date": "2026-09-17T19:52:01.350Z",
+    "score": "9/11",
+    "avgSeconds": 63,
+    "results": [
+      {
+        "id": "beam-udl",
+        "seconds": 69,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "analyze_beam"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "cantilever",
+        "seconds": 50,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "analyze_beam"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "rc-beam",
+        "seconds": 19,
+        "toolsOk": false,
+        "valueOk": false,
+        "called": [],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "column",
+        "seconds": 75,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "design_rc_column"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "footing",
+        "seconds": 42,
+        "toolsOk": false,
+        "valueOk": false,
+        "called": [],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "slab",
+        "seconds": 92,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "design_one_way_slab"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "concrete-qty",
+        "seconds": 49,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "concrete_materials"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "units",
+        "seconds": 83,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "convert_units"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "code",
+        "seconds": 79,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "search_code_clauses"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "bearing",
+        "seconds": 67,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "bearing_capacity"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "drawing",
+        "seconds": 71,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "draw_beam_section"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      }
+    ]
+  },
+  {
+    "provider": "ollama",
+    "model": "qwen3.5:9b",
+    "served": "ollama/qwen3.5:9b",
+    "date": "2026-09-17T19:57:02.893Z",
+    "score": "11/11",
+    "avgSeconds": 15,
+    "results": [
+      {
+        "id": "beam-udl",
+        "seconds": 15,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "analyze_beam"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      },
+      {
+        "id": "cantilever",
+        "seconds": 16,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "analyze_beam"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      },
+      {
+        "id": "rc-beam",
+        "seconds": 33,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "design_rc_beam",
+          "draw_beam_section"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      },
+      {
+        "id": "column",
+        "seconds": 17,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "design_rc_column"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      },
+      {
+        "id": "footing",
+        "seconds": 20,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "design_isolated_footing",
+          "draw_footing"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      },
+      {
+        "id": "slab",
+        "seconds": 15,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "design_one_way_slab"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      },
+      {
+        "id": "concrete-qty",
+        "seconds": 8,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "concrete_materials"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      },
+      {
+        "id": "units",
+        "seconds": 6,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "convert_units"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      },
+      {
+        "id": "code",
+        "seconds": 11,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "search_code_clauses"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      },
+      {
+        "id": "bearing",
+        "seconds": 13,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "bearing_capacity"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      },
+      {
+        "id": "drawing",
+        "seconds": 11,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "draw_beam_section"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      }
+    ]
+  },
+  {
+    "provider": "local",
+    "model": "qwen3.5-4b",
+    "served": "local/qwen3.5-4b",
+    "date": "2026-09-17T20:06:32.348Z",
+    "score": "11/11",
+    "avgSeconds": 50,
+    "results": [
+      {
+        "id": "beam-udl",
+        "seconds": 41,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "analyze_beam"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "cantilever",
+        "seconds": 49,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "analyze_beam"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "rc-beam",
+        "seconds": 89,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "design_rc_beam",
+          "draw_beam_section"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "column",
+        "seconds": 44,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "design_rc_column"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "footing",
+        "seconds": 75,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "design_isolated_footing",
+          "draw_footing"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "slab",
+        "seconds": 57,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "design_one_way_slab"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "concrete-qty",
+        "seconds": 19,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "concrete_materials"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "units",
+        "seconds": 17,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "convert_units"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "code",
+        "seconds": 39,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "search_code_clauses"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "bearing",
+        "seconds": 49,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "bearing_capacity"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      },
+      {
+        "id": "drawing",
+        "seconds": 73,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "draw_beam_section"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      }
+    ]
+  },
+  {
+    "provider": "local",
+    "model": "qwen3.5-4b",
+    "served": "local/qwen3.5-4b",
+    "date": "2026-09-17T21:20:28.040Z",
+    "score": "1/1",
+    "avgSeconds": 165,
+    "results": [
+      {
+        "id": "house-plan",
+        "seconds": 165,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "plan_layout",
+          "draw_floor_plan"
+        ],
+        "error": null,
+        "served": "local/qwen3.5-4b",
+        "answered": true
+      }
+    ]
+  },
+  {
+    "provider": "ollama",
+    "model": "qwen3.5:9b",
+    "served": "ollama/qwen3.5:9b",
+    "date": "2026-09-17T21:21:14.538Z",
+    "score": "1/1",
+    "avgSeconds": 46,
+    "results": [
+      {
+        "id": "house-plan",
+        "seconds": 46,
+        "toolsOk": true,
+        "valueOk": true,
+        "called": [
+          "plan_layout",
+          "draw_floor_plan"
+        ],
+        "error": null,
+        "served": "ollama/qwen3.5:9b",
+        "answered": true
+      }
+    ]
+  }
+]

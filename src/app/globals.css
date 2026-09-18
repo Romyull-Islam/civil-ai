@@ -1,26 +1,74 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #0f1216;
+  --bg-elev: #161a20;
+  --bg-elev2: #1d222a;
+  --border: #2a3039;
+  --fg: #e6e8eb;
+  --fg-muted: #9aa3ad;
+  --accent: #f5a524;
+  --accent-fg: #1a1200;
+  --accent-2: #38bdf8;
+  --ok: #34d399;
+  --err: #f87171;
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+:root[data-theme="light"] {
+  --bg: #f6f7f9; --bg-elev: #ffffff; --bg-elev2: #eef0f3; --border: #d9dde3; --fg: #171a1f; --fg-muted: #5b6470; --accent: #d97706; --accent-fg: #ffffff; --accent-2: #0284c7;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-elev: var(--bg-elev);
+  --color-elev2: var(--bg-elev2);
+  --color-border: var(--border);
+  --color-fg: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent2: var(--accent-2);
+  --color-ok: var(--ok);
+  --color-err: var(--err);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); }
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
+.prose-chat { line-height: 1.6; font-size: 0.95rem; }
+.prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; margin: 0.9em 0 0.4em; }
+.prose-chat h1 { font-size: 1.2rem; } .prose-chat h2 { font-size: 1.1rem; } .prose-chat h3 { font-size: 1rem; }
+.prose-chat p { margin: 0.45em 0; }
+.prose-chat ul, .prose-chat ol { margin: 0.4em 0 0.4em 1.3em; }
+.prose-chat ul { list-style: disc; } .prose-chat ol { list-style: decimal; }
+.prose-chat li { margin: 0.15em 0; }
+.prose-chat code { background: var(--bg-elev2); padding: 0.1em 0.35em; border-radius: 4px; font-family: var(--font-mono); font-size: 0.85em; }
+.prose-chat pre { background: var(--bg-elev2); padding: 0.75rem; border-radius: 8px; overflow-x: auto; margin: 0.6em 0; }
+.prose-chat pre code { background: none; padding: 0; }
+.prose-chat table { border-collapse: collapse; margin: 0.6em 0; font-size: 0.88em; width: 100%; }
+.prose-chat th, .prose-chat td { border: 1px solid var(--border); padding: 0.3em 0.55em; text-align: left; }
+.prose-chat th { background: var(--bg-elev2); }
+.prose-chat blockquote { border-left: 3px solid var(--accent); padding-left: 0.75em; color: var(--fg-muted); margin: 0.5em 0; }
+.prose-chat a { color: var(--accent-2); text-decoration: underline; }
+.prose-chat hr { border-color: var(--border); margin: 0.8em 0; }
+.katex-display { overflow-x: auto; overflow-y: hidden; }
+
+.btn { display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 8px; padding: 0.45rem 0.8rem; font-size: 0.875rem; font-weight: 500; border: 1px solid var(--border); background: var(--bg-elev); color: var(--fg); cursor: pointer; transition: background .15s, border-color .15s; }
+.btn:hover { background: var(--bg-elev2); border-color: var(--fg-muted); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn-primary:hover { filter: brightness(1.08); background: var(--accent); }
+.btn-sm { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+.input, .select, .textarea { width: 100%; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); padding: 0.45rem 0.65rem; font-size: 0.875rem; outline: none; }
+.input:focus, .select:focus, .textarea:focus { border-color: var(--accent-2); }
+.card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; }
+.label { font-size: 0.75rem; color: var(--fg-muted); text-transform: uppercase; letter-spacing: .04em; }
+.badge { display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: 999px; border: 1px solid var(--border); color: var(--fg-muted); }
+@keyframes pulse-dot { 0%, 100% { opacity: .3 } 50% { opacity: 1 } }
+.typing span { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--fg-muted); margin-right: 3px; animation: pulse-dot 1.2s infinite; }
+.typing span:nth-child(2) { animation-delay: .2s } .typing span:nth-child(3) { animation-delay: .4s }
