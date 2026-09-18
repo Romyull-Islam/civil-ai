@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { HardHat } from "lucide-react";
+import { Logo } from "./Logo";
 import { refreshSession } from "@/lib/client/session";
 
 export function AuthForm({ kind }: { kind: "login" | "signup" }) {
@@ -22,7 +22,7 @@ export function AuthForm({ kind }: { kind: "login" | "signup" }) {
   return (
     <div className="min-h-full flex items-center justify-center p-6">
       <form onSubmit={submit} className="card p-6 w-full max-w-sm grid gap-3">
-        <div className="flex items-center gap-2 mb-1"><HardHat className="text-accent" /><span className="font-semibold text-lg">Civil AI</span></div>
+        <div className="flex items-center gap-2 mb-1"><Logo size={30} /></div>
         <h1 className="font-medium">{kind === "login" ? "Sign in" : "Create your account"}</h1>
         {kind === "signup" && <div><label className="label">Name</label><input className="input mt-1" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></div>}
         <div><label className="label">Email</label><input className="input mt-1" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></div>

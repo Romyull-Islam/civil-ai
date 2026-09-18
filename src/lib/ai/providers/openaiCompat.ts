@@ -26,7 +26,7 @@ function toMessages(system: string, messages: ChatMessage[]): ChatCompletionMess
 export function makeOpenAICompatProvider(providerId: string): Provider {
   return {
     async streamTurn(req: ProviderRequest): Promise<ProviderTurn> {
-      const client = new OpenAI({ apiKey: req.apiKey || "none", baseURL: req.baseUrl, defaultHeaders: providerId === "openrouter" ? { "HTTP-Referer": "https://civil-ai.local", "X-Title": "Civil AI" } : undefined });
+      const client = new OpenAI({ apiKey: req.apiKey || "none", baseURL: req.baseUrl, defaultHeaders: providerId === "openrouter" ? { "HTTP-Referer": "https://civil-ai.local", "X-Title": "CivilMate" } : undefined });
       const tools: ChatCompletionTool[] = req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: toolJsonSchema(t, "openai") } }));
       let text = "";
       const calls = new Map<number, { id: string; name: string; args: string }>();

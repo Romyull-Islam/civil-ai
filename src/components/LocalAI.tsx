@@ -48,7 +48,7 @@ export function LocalAI({ compact = false }: { compact?: boolean }) {
       <div className="card p-3 text-sm flex flex-wrap items-center gap-3">
         <Cpu size={18} className="text-accent shrink-0" />
         <div className="flex-1 min-w-48">
-          <div className="font-medium">Set up the built-in offline model — free and unlimited</div>
+          <div className="font-medium">Set up the built-in offline model, free and unlimited</div>
           <div className="text-xs text-muted">{busy ? `${st.progress.phase === "model" ? "Downloading model" : st.progress.phase === "binary" ? "Downloading engine" : "Extracting"} ${st.progress.file ?? ""} ${pct}% (${gb(st.progress.received)} / ${gb(st.progress.total)} GB)` : `Recommended for this PC: ${st.catalog.find((m) => m.id === st.recommended)?.label} (${st.catalog.find((m) => m.id === st.recommended)?.sizeGB} GB download)`}</div>
         </div>
         {busy ? <div className="w-32 h-2 bg-elev2 rounded overflow-hidden"><div className="h-full bg-accent" style={{ width: `${pct}%` }} /></div> : st.activeModel && st.binaryInstalled ? <button className="btn btn-sm" onClick={() => act("start")}><Play size={14} /> Start</button> : <button className="btn btn-primary btn-sm" onClick={() => act("setup", { modelId: st.recommended })}><Download size={14} /> Install</button>}
@@ -68,7 +68,7 @@ export function LocalAI({ compact = false }: { compact?: boolean }) {
           <label key={m.id} className={`flex items-start gap-3 rounded-lg border px-3 py-2 cursor-pointer ${choice === m.id ? "border-accent2" : "border-border"} ${!m.fits ? "opacity-50" : ""}`}>
             <input type="radio" name="localmodel" className="mt-1" checked={choice === m.id} onChange={() => setChoice(m.id)} disabled={busy} />
             <div className="flex-1 text-sm">
-              <div className="flex flex-wrap items-center gap-2"><span className="font-medium">{m.label}</span><span className="badge">{m.sizeGB} GB</span><span className="badge">needs {m.minRamGB} GB RAM</span>{m.vision && <span className="badge">vision</span>}<span className="badge" title="Licence — free for commercial use">{m.license}</span>{m.id === st.recommended && <span className="badge text-ok border-ok/40">recommended</span>}{m.installed && <span className="badge text-ok border-ok/40">installed</span>}{!m.fits && <span className="badge text-err border-err/40">too big for this PC</span>}</div>
+              <div className="flex flex-wrap items-center gap-2"><span className="font-medium">{m.label}</span><span className="badge">{m.sizeGB} GB</span><span className="badge">needs {m.minRamGB} GB RAM</span>{m.vision && <span className="badge">vision</span>}<span className="badge" title="Licence: free for commercial use">{m.license}</span>{m.id === st.recommended && <span className="badge text-ok border-ok/40">recommended</span>}{m.installed && <span className="badge text-ok border-ok/40">installed</span>}{!m.fits && <span className="badge text-err border-err/40">too big for this PC</span>}</div>
               <div className="text-xs text-muted">{m.note}</div>
             </div>
           </label>
@@ -77,7 +77,7 @@ export function LocalAI({ compact = false }: { compact?: boolean }) {
       </div>
       {busy && (
         <div className="grid gap-1 text-xs">
-          <div>{st.progress.phase === "model" ? "Downloading model" : st.progress.phase === "binary" ? "Downloading engine" : "Extracting"} {st.progress.file} — {pct}% ({gb(st.progress.received)} / {gb(st.progress.total)} GB){st.progress.message ? ` · ${st.progress.message}` : ""}</div>
+          <div>{st.progress.phase === "model" ? "Downloading model" : st.progress.phase === "binary" ? "Downloading engine" : "Extracting"} {st.progress.file}: {pct}% ({gb(st.progress.received)} / {gb(st.progress.total)} GB){st.progress.message ? ` · ${st.progress.message}` : ""}</div>
           <div className="w-full h-2 bg-elev2 rounded overflow-hidden"><div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} /></div>
         </div>
       )}

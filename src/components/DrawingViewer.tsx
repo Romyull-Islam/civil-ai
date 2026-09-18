@@ -23,7 +23,7 @@ export function DrawingViewer({ drawing, svg, height = 360 }: { drawing: Drawing
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
-  const markup = svg ?? toSvg(drawing);
+  const markup = svg || toSvg(drawing); // shared/backed-up copies store geometry only (svg ""), so re-render
 
   const exportPng = async () => {
     const svgBlob = new Blob([toSvg(drawing, { background: "#ffffff" }).replace('style="color:#e8e8e8"', 'style="color:#111"')], { type: "image/svg+xml" });

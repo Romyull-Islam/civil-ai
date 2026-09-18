@@ -15,6 +15,6 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ user: publicUser(user), token }), { headers: { "Content-Type": "application/json", "Set-Cookie": sessionCookie(token) } });
   } catch (err) {
     const lock = await loginFailed(e);
-    return Response.json({ error: lock.locked ? "Too many failed attempts — account locked for 15 minutes" : (err instanceof Error ? err.message : String(err)) }, { status: lock.locked ? 423 : 401 });
+    return Response.json({ error: lock.locked ? "Too many failed attempts, account locked for 15 minutes" : (err instanceof Error ? err.message : String(err)) }, { status: lock.locked ? 423 : 401 });
   }
 }

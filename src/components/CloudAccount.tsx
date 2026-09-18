@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Cloud, LogOut } from "lucide-react";
 import { useSession, refreshSession } from "@/lib/client/session";
 
-/** Desktop / self-hosted: link the app to a hosted Civil AI account so cloud models come from your subscription. */
+/** Desktop / self-hosted: link the app to a hosted CivilMate account so cloud models come from your subscription. */
 export function CloudAccount() {
   const session = useSession();
   const [url, setUrl] = useState(process.env.NEXT_PUBLIC_CLOUD_BACKEND_URL ?? "");
@@ -19,8 +19,8 @@ export function CloudAccount() {
   const unlink = async () => { await fetch("/api/cloud/logout", { method: "POST" }); refreshSession(); };
   return (
     <section className="card p-4 grid gap-3">
-      <div className="flex items-center gap-2"><Cloud className="text-accent" size={18} /><h2 className="font-medium">Civil AI cloud account (better models)</h2>{c?.linked && <span className="badge text-ok border-ok/40">linked · {c.email}{c.plan?.name ? ` · ${c.plan.name}` : ""}</span>}</div>
-      <p className="text-xs text-muted">The local model works offline and is unlimited. For harder design questions, sign in to your Civil AI subscription: cloud models are then available in the model selector and answered by the service with its own API keys. No keys to manage.</p>
+      <div className="flex items-center gap-2"><Cloud className="text-accent" size={18} /><h2 className="font-medium">CivilMate cloud account (better models)</h2>{c?.linked && <span className="badge text-ok border-ok/40">linked · {c.email}{c.plan?.name ? ` · ${c.plan.name}` : ""}</span>}</div>
+      <p className="text-xs text-muted">The local model works offline and is unlimited. For harder design questions, sign in to your CivilMate subscription: cloud models are then available in the model selector and answered by the service with its own API keys. No keys to manage.</p>
       {c?.linked ? (
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span>{c.backendUrl}</span>{c.offline && <span className="badge text-err border-err/40">offline</span>}

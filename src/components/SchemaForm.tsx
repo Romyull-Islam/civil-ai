@@ -34,7 +34,7 @@ function Field({ name, schema, value, onChange, required }: { name: string; sche
   const label = <label className="label flex items-center gap-1">{name}{required && <span className="text-accent">*</span>}</label>;
   const help = schema.description && <div className="text-[11px] text-muted mt-0.5">{schema.description}</div>;
   if (schema.enum) {
-    return <div>{label}<select className="select mt-1" value={String(value ?? "")} onChange={(e) => onChange(e.target.value)}><option value="">—</option>{schema.enum.map((o) => <option key={String(o)} value={String(o)}>{String(o)}</option>)}</select>{help}</div>;
+    return <div>{label}<select className="select mt-1" value={String(value ?? "")} onChange={(e) => onChange(e.target.value)}><option value="">Select…</option>{schema.enum.map((o) => <option key={String(o)} value={String(o)}>{String(o)}</option>)}</select>{help}</div>;
   }
   if (t === "number" || t === "integer") {
     return <div>{label}<input className="input mt-1" type="number" step="any" value={value === undefined || value === null ? "" : String(value)} onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))} />{help}</div>;

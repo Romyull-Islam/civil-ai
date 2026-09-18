@@ -10,6 +10,7 @@ export const isStaff = (r: Role) => r !== "user";
 export interface User { id: string; email: string; name: string; passwordHash: string; role: Role; plan: string; planExpires: number | null; createdAt: number; disabled: number; emailVerified: number; verifyCode: string | null; verifyExpires: number | null }
 export interface Payment { id: string; userId: string; email: string; plan: string; method: string; amount: number; currency: string; txnId: string; sender: string; status: "pending" | "approved" | "rejected"; note: string; createdAt: number; reviewedAt: number | null; seats: number }
 export interface Team { id: string; name: string; ownerId: string; plan: string; seats: number; expires: number | null; createdAt: number }
+export interface Share { id: string; userId: string; title: string; size: number; data: string; createdAt: number; expiresAt: number; views: number }
 export interface Save { id: string; userId: string; kind: "chat" | "drawing"; title: string; size: number; data: string /* base64 gzip json */; createdAt: number; updatedAt: number }
 export interface Ticket { id: string; userId: string | null; email: string; subject: string; message: string; status: "open" | "answered" | "closed"; reply: string; createdAt: number; updatedAt: number }
 export interface Session { token: string; userId: string; expires: number }
@@ -58,6 +59,12 @@ export interface DB {
   deleteSave(userId: string, id: string): Promise<void>;
   savesUsage(userId: string): Promise<{ bytes: number; count: number }>;
   savesTotal(): Promise<{ bytes: number; count: number; users: number }>;
+  createShare(sh: Share): Promise<void>;
+  getShare(id: string): Promise<Share | null>;
+  listShares(userId: string): Promise<Omit<Share, "data">[]>;
+  deleteShare(userId: string, id: string): Promise<void>;
+  bumpShareViews(id: string): Promise<void>;
+  purgeExpiredShares(): Promise<void>;
 }
 
 const SCHEMA = (big: string) => [
@@ -68,6 +75,7 @@ const SCHEMA = (big: string) => [
   `CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, email TEXT NOT NULL, plan TEXT NOT NULL, method TEXT NOT NULL, amount REAL NOT NULL, currency TEXT NOT NULL, txn_id TEXT NOT NULL, sender TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', note TEXT NOT NULL DEFAULT '', created_at ${big} NOT NULL, reviewed_at ${big})`,
   `CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL, plan TEXT NOT NULL, seats INTEGER NOT NULL DEFAULT 3, expires ${big}, created_at ${big} NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS team_members (team_id TEXT NOT NULL, user_id TEXT NOT NULL, added_at ${big} NOT NULL, PRIMARY KEY (team_id, user_id))`,
+  `CREATE TABLE IF NOT EXISTS shares (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, created_at ${big} NOT NULL, expires_at ${big} NOT NULL, views INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS saves (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, created_at ${big} NOT NULL, updated_at ${big} NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS saves_user ON saves (user_id, updated_at)`,
   `CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, user_id TEXT, email TEXT NOT NULL, subject TEXT NOT NULL, message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', reply TEXT NOT NULL DEFAULT '', created_at ${big} NOT NULL, updated_at ${big} NOT NULL)`,
@@ -84,6 +92,7 @@ type Row = Record<string, unknown>;
 const toUser = (r: Row): User => ({ id: String(r.id), email: String(r.email), name: String(r.name ?? ""), passwordHash: String(r.password_hash), role: (ROLES as string[]).includes(String(r.role)) ? (r.role as Role) : "user", plan: String(r.plan), planExpires: r.plan_expires == null ? null : Number(r.plan_expires), createdAt: Number(r.created_at), disabled: Number(r.disabled ?? 0), emailVerified: Number(r.email_verified ?? 0), verifyCode: r.verify_code == null ? null : String(r.verify_code), verifyExpires: r.verify_expires == null ? null : Number(r.verify_expires) });
 const toPayment = (r: Row): Payment => ({ id: String(r.id), userId: String(r.user_id), email: String(r.email), plan: String(r.plan), method: String(r.method), amount: Number(r.amount), currency: String(r.currency), txnId: String(r.txn_id), sender: String(r.sender ?? ""), status: r.status as Payment["status"], note: String(r.note ?? ""), createdAt: Number(r.created_at), reviewedAt: r.reviewed_at == null ? null : Number(r.reviewed_at), seats: Number(r.seats ?? 1) });
 const toTeam = (r: Row): Team => ({ id: String(r.id), name: String(r.name), ownerId: String(r.owner_id), plan: String(r.plan), seats: Number(r.seats), expires: r.expires == null ? null : Number(r.expires), createdAt: Number(r.created_at) });
+const toShare = (r: Row): Share => ({ id: String(r.id), userId: String(r.user_id), title: String(r.title), size: Number(r.size), data: String(r.data ?? ""), createdAt: Number(r.created_at), expiresAt: Number(r.expires_at), views: Number(r.views ?? 0) });
 const toSave = (r: Row): Save => ({ id: String(r.id), userId: String(r.user_id), kind: r.kind === "drawing" ? "drawing" : "chat", title: String(r.title), size: Number(r.size), data: String(r.data ?? ""), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) });
 const toTicket = (r: Row): Ticket => ({ id: String(r.id), userId: r.user_id == null ? null : String(r.user_id), email: String(r.email), subject: String(r.subject), message: String(r.message), status: r.status as Ticket["status"], reply: String(r.reply ?? ""), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) });
 const toUsage = (r: Row | undefined): UsageRow => ({ day: String(r?.day ?? ""), requests: Number(r?.requests ?? 0), inputTokens: Number(r?.input_tokens ?? 0), outputTokens: Number(r?.output_tokens ?? 0) });
@@ -104,7 +113,7 @@ function makeDB(run: (sql: string, params?: unknown[]) => Promise<void>, all: (s
       if (!cols.length) return;
       await run(`UPDATE users SET ${cols.join(", ")} WHERE id = ?`, [...vals, id]);
     },
-    async deleteUser(id) { await run("DELETE FROM sessions WHERE user_id = ?", [id]); await run("DELETE FROM saves WHERE user_id = ?", [id]); await run("DELETE FROM team_members WHERE user_id = ?", [id]); await run("DELETE FROM users WHERE id = ?", [id]); },
+    async deleteUser(id) { await run("DELETE FROM sessions WHERE user_id = ?", [id]); await run("DELETE FROM saves WHERE user_id = ?", [id]); await run("DELETE FROM shares WHERE user_id = ?", [id]); await run("DELETE FROM team_members WHERE user_id = ?", [id]); await run("DELETE FROM users WHERE id = ?", [id]); },
     async listUsers(limit = 500) { return (await all("SELECT * FROM users ORDER BY created_at DESC LIMIT ?", [limit])).map(toUser); },
     async countUsers() { return Number((await one("SELECT COUNT(*) AS n FROM users"))?.n ?? 0); },
     async createSession(s) { await run("INSERT INTO sessions (token, user_id, expires) VALUES (?,?,?)", [s.token, s.userId, s.expires]); },
@@ -139,6 +148,12 @@ function makeDB(run: (sql: string, params?: unknown[]) => Promise<void>, all: (s
     async getSave(userId, id) { const r = await one("SELECT * FROM saves WHERE id = ? AND user_id = ?", [id, userId]); return r ? toSave(r) : null; },
     async deleteSave(userId, id) { await run("DELETE FROM saves WHERE id = ? AND user_id = ?", [id, userId]); },
     async savesUsage(userId) { const r = await one("SELECT COALESCE(SUM(size),0) AS bytes, COUNT(*) AS n FROM saves WHERE user_id = ?", [userId]); return { bytes: Number(r?.bytes ?? 0), count: Number(r?.n ?? 0) }; },
+    async createShare(sh) { await run("INSERT INTO shares (id, user_id, title, size, data, created_at, expires_at, views) VALUES (?,?,?,?,?,?,?,?)", [sh.id, sh.userId, sh.title, sh.size, sh.data, sh.createdAt, sh.expiresAt, 0]); },
+    async getShare(id) { const r = await one("SELECT * FROM shares WHERE id = ?", [id]); return r ? toShare(r) : null; },
+    async listShares(userId) { return (await all("SELECT id, user_id, title, size, created_at, expires_at, views FROM shares WHERE user_id = ? ORDER BY created_at DESC LIMIT 200", [userId])).map((r) => { const { data: _d, ...rest } = toShare({ ...r, data: "" }); void _d; return rest; }); },
+    async deleteShare(userId, id) { await run("DELETE FROM shares WHERE id = ? AND user_id = ?", [id, userId]); },
+    async bumpShareViews(id) { await run("UPDATE shares SET views = views + 1 WHERE id = ?", [id]); },
+    async purgeExpiredShares() { await run("DELETE FROM shares WHERE expires_at < ?", [Date.now()]); },
     async savesTotal() { const r = await one("SELECT COALESCE(SUM(size),0) AS bytes, COUNT(*) AS n, COUNT(DISTINCT user_id) AS u FROM saves"); return { bytes: Number(r?.bytes ?? 0), count: Number(r?.n ?? 0), users: Number(r?.u ?? 0) }; },
     async usageByUser(days, limit = 50) { return (await all("SELECT u.user_id, us.email, SUM(u.requests) AS requests, SUM(u.input_tokens) AS input_tokens, SUM(u.output_tokens) AS output_tokens FROM usage u JOIN users us ON us.id = u.user_id WHERE u.day >= ? GROUP BY u.user_id, us.email ORDER BY requests DESC LIMIT ?", [dayCutoff(days), limit])).map((r) => ({ ...toUsage(r), userId: String(r.user_id), email: String(r.email) })); },
   };

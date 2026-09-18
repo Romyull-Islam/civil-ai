@@ -136,7 +136,7 @@ export default function SubscribePage() {
         {mine.length > 0 && (
           <div className="card p-4 text-sm"><div className="label mb-2">Your payment history</div>
             <table className="w-full text-xs"><thead><tr className="text-left text-muted"><th>Date</th><th>Plan</th><th>Method</th><th>Amount</th><th>Reference</th><th>Status</th></tr></thead>
-              <tbody>{mine.map((p) => <tr key={p.id} className="border-t border-border"><td className="py-1">{new Date(p.createdAt).toLocaleDateString()}</td><td>{p.plan}</td><td>{p.method}</td><td>{cur(p.currency)}{p.amount}</td><td className="font-mono">{p.txnId}</td><td><span className={`badge ${p.status === "approved" ? "text-ok border-ok/40" : p.status === "rejected" ? "text-err border-err/40" : ""}`}>{p.status === "approved" ? "paid" : p.status}</span>{p.note && p.status === "rejected" ? <span className="text-muted"> — {p.note}</span> : null}</td></tr>)}</tbody></table>
+              <tbody>{mine.map((p) => <tr key={p.id} className="border-t border-border"><td className="py-1">{new Date(p.createdAt).toLocaleDateString()}</td><td>{p.plan}</td><td>{p.method}</td><td>{cur(p.currency)}{p.amount}</td><td className="font-mono">{p.txnId}</td><td><span className={`badge ${p.status === "approved" ? "text-ok border-ok/40" : p.status === "rejected" ? "text-err border-err/40" : ""}`}>{p.status === "approved" ? "paid" : p.status}</span>{p.note && p.status === "rejected" ? <span className="text-muted"> ({p.note})</span> : null}</td></tr>)}</tbody></table>
           </div>
         )}
       </div>

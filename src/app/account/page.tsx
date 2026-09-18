@@ -15,6 +15,9 @@ export default function AccountPage() {
   const [tfa, setTfa] = useState<{ enabled: boolean; staff: boolean } | null>(null); const [setup, setSetup] = useState<{ secret: string; otpauth: string } | null>(null); const [tcode, setTcode] = useState(""); const [tmsg, setTmsg] = useState<string | null>(null);
   useEffect(() => { fetch("/api/auth/totp").then((r) => (r.ok ? r.json() : null)).then((j) => j && setTfa(j)).catch(() => {}); }, []);
   const tfaAction = async (action: string, extra: Record<string, string> = {}) => { setTmsg(null); const r = await fetch("/api/auth/totp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...extra }) }); const j = await r.json(); if (!r.ok) { setTmsg(j.error); return; } if (action === "start") setSetup(j); else { setSetup(null); setTcode(""); setTmsg(action === "confirm" ? "Two-factor authentication enabled." : "Two-factor authentication disabled."); setTfa((t) => t && { ...t, enabled: action === "confirm" }); } };
+  const [shares, setShares] = useState<{ id: string; title: string; views: number; expiresAt: number }[]>([]);
+  useEffect(() => { fetch("/api/share").then((r) => (r.ok ? r.json() : null)).then((j) => j && setShares(j.shares ?? [])).catch(() => {}); }, []);
+  const stopShare = async (id: string) => { await fetch("/api/share", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }); setShares((l) => l.filter((x) => x.id !== id)); };
   const outcome = useSyncExternalStore(() => () => {}, () => new URLSearchParams(window.location.search).get("payment"), () => null);
   if (!s) return <div className="p-6 text-sm text-muted">Loading…</div>;
   if (s.mode !== "saas") return <div className="p-6 text-sm text-muted">Accounts are not used in this deployment.</div>;
@@ -22,7 +25,7 @@ export default function AccountPage() {
   return (
     <div className="h-full overflow-y-auto"><div className="max-w-2xl mx-auto p-6 grid gap-4">
       <div className="flex items-center gap-2"><User className="text-accent" /><h1 className="text-lg font-semibold">Account</h1></div>
-      {outcome && <div className={`card p-3 text-sm ${outcome === "paid" ? "border-ok/50 text-ok" : outcome === "pending" ? "border-accent/50" : "border-err/50 text-err"}`}>{outcome === "paid" ? "Payment received — your plan is active." : outcome === "pending" ? "Payment is being verified; your plan activates automatically once confirmed." : outcome === "cancelled" ? "Payment cancelled." : outcome === "failed" ? "Payment failed. Nothing was charged; you can try again or pay manually." : "We could not verify this payment. Contact support with your transaction ID."}</div>}
+      {outcome && <div className={`card p-3 text-sm ${outcome === "paid" ? "border-ok/50 text-ok" : outcome === "pending" ? "border-accent/50" : "border-err/50 text-err"}`}>{outcome === "paid" ? "Payment received. Your plan is active." : outcome === "pending" ? "Payment is being verified; your plan activates automatically once confirmed." : outcome === "cancelled" ? "Payment cancelled." : outcome === "failed" ? "Payment failed. Nothing was charged; you can try again or pay manually." : "We could not verify this payment. Contact support with your transaction ID."}</div>}
       <div className="card p-4 grid gap-2 text-sm">
         <div><span className="label">Signed in as</span><div className="flex items-center gap-2">{s.avatar && <Avatar src={s.avatar} />}<span>{s.user.name || s.user.email} <span className="text-muted">({s.user.email})</span> {s.user.role !== "user" && <span className="badge ml-1">{s.user.role}</span>}</span></div><div className="text-[11px] text-muted">Profile picture comes from your email via Gravatar (gravatar.com).</div></div>
         {s.cloudQuota && <div><span className="label">Cloud backups</span><div>{s.cloudQuota.limitBytes > 0 ? `${(s.cloudQuota.usedBytes / 1048576).toFixed(2)} of ${(s.cloudQuota.limitBytes / 1048576).toFixed(0)} MB used · ${s.cloudQuota.count} items` : "Not included in the Free plan"} · <Link className="text-accent2" href="/saves">manage</Link></div></div>}
@@ -48,6 +51,10 @@ export default function AccountPage() {
           {tmsg && <div className="text-xs">{tmsg}</div>}
         </div>
       )}
+      <div className="card p-4 grid gap-2 text-sm">
+        <div className="font-medium">Shared links</div>
+        {shares.length ? shares.map((x) => <div key={x.id} className="flex flex-wrap items-center gap-2 border-t border-border pt-2"><a className="text-accent2 truncate flex-1" href={`/share/${x.id}`} target="_blank" rel="noreferrer">{x.title}</a><span className="text-xs text-muted">{x.views} views · until {new Date(x.expiresAt).toLocaleDateString()}</span><button className="btn btn-sm text-err" onClick={() => stopShare(x.id)}>Stop sharing</button></div>) : <div className="text-xs text-muted">No active share links. Use Share on any chat to create one.</div>}
+      </div>
       <button className="btn justify-self-start" onClick={logoutClient}><LogOut size={15} /> Sign out</button>
     </div></div>
   );

@@ -5,7 +5,7 @@
  * Without any, codes are logged to the server console (development only).
  */
 export async function sendEmail(to: string, subject: string, text: string): Promise<{ delivered: boolean; via: string }> {
-  const from = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `Civil AI <${process.env.SMTP_USER}>` : "Civil AI <no-reply@example.com>");
+  const from = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `CivilMate <${process.env.SMTP_USER}>` : "CivilMate <no-reply@example.com>");
   if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
     const nodemailer = await import("nodemailer");
     const port = Number(process.env.SMTP_PORT ?? 465);
@@ -18,7 +18,7 @@ export async function sendEmail(to: string, subject: string, text: string): Prom
   }
   if (process.env.BREVO_API_KEY) {
     const m = /^(.*)<(.+)>$/.exec(from);
-    const r = await fetch("https://api.brevo.com/v3/smtp/email", { method: "POST", headers: { "api-key": process.env.BREVO_API_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ sender: { name: m?.[1]?.trim() || "Civil AI", email: m?.[2] ?? from }, to: [{ email: to }], subject, textContent: text }) });
+    const r = await fetch("https://api.brevo.com/v3/smtp/email", { method: "POST", headers: { "api-key": process.env.BREVO_API_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ sender: { name: m?.[1]?.trim() || "CivilMate", email: m?.[2] ?? from }, to: [{ email: to }], subject, textContent: text }) });
     return { delivered: r.ok, via: "brevo" };
   }
   console.log(`[email → ${to}] ${subject}\n${text}`);

@@ -13,7 +13,7 @@ export const stripe: Gateway = {
   id: "stripe",
   label: "Stripe (cards, international)",
   methods: "Visa/Mastercard/Amex worldwide, Apple Pay, Google Pay",
-  fields: [{ key: "secret_key", label: "Secret key (sk_test_… / sk_live_…)", secret: true }, { key: "webhook_secret", label: "Webhook signing secret (whsec_…) — optional, for auto-renewal", secret: true }, { key: "recurring", label: "Recurring monthly subscription? (yes/no)", placeholder: "no" }],
+  fields: [{ key: "secret_key", label: "Secret key (sk_test_… / sk_live_…)", secret: true }, { key: "webhook_secret", label: "Webhook signing secret (whsec_…), optional, for auto-renewal", secret: true }, { key: "recurring", label: "Recurring monthly subscription? (yes/no)", placeholder: "no" }],
   docs: "https://docs.stripe.com/payments/checkout",
   async createCheckout(cfg, ctx) {
     const recurring = /^y/i.test(cfg.values.recurring ?? "");

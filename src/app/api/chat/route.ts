@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   let onDone: ((usage?: { input: number; output: number }) => void) | null = null;
   let chainOverride: string[] | undefined;
 
-  // Downloadable/self-hosted app linked to a hosted Civil AI account: cloud models are answered by the backend (its keys, its quotas);
+  // Downloadable/self-hosted app linked to a hosted CivilMate account: cloud models are answered by the backend (its keys, its quotas);
   // local/ollama requests and users with their own keys still run here.
   if (appMode() !== "saas" && provider !== "local" && provider !== "ollama" && provider !== "local-first") {
     const link = await getCloudLink();

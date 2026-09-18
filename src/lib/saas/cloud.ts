@@ -1,6 +1,6 @@
 /**
  * Desktop ↔ cloud bridge. The downloadable app runs local models itself and, when the user picks a cloud model,
- * forwards the request to your hosted Civil AI backend (SaaS mode) with the user's session token. Keys never leave the server.
+ * forwards the request to your hosted CivilMate backend (SaaS mode) with the user's session token. Keys never leave the server.
  */
 import { getDB } from "./db";
 
@@ -36,7 +36,7 @@ export async function cloudMe(link: CloudLink) {
 export async function localAIAllowed(mode: string): Promise<{ allowed: boolean; reason?: string }> {
   if (mode === "byok" || process.env.CIVIL_AI_LOCAL_AI_FREE === "1") return { allowed: true };
   const link = await getCloudLink();
-  if (!link) return { allowed: false, reason: "Sign in to your Civil AI account (Settings → cloud account). The offline model is included in Pro and Business plans." };
+  if (!link) return { allowed: false, reason: "Sign in to your CivilMate account (Settings → cloud account). The offline model is included in Pro and Business plans." };
   if (link.checkedAt && Date.now() - link.checkedAt > 14 * 86400000) { try { await cloudMe(link); } catch { /* offline: keep cached */ } }
   const fresh = (await getCloudLink()) ?? link;
   if (!fresh.localAI) return { allowed: false, reason: `Your plan (${fresh.plan ?? "free"}) does not include the offline model. Upgrade to Pro or Business.` };

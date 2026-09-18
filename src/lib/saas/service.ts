@@ -125,7 +125,7 @@ export async function answerTicket(id: string, reply: string, status: Ticket["st
   const t = (await db.listTickets({ limit: 1000 })).find((x) => x.id === id);
   if (t && reply) { const site = await getSite(); sendEmail(t.email, `Re: ${t.subject}`, `${reply}
 
-— ${site.appName} support`).catch(() => {}); }
+${site.appName} support`).catch(() => {}); }
   return t ?? null;
 }
 
@@ -279,7 +279,7 @@ export async function resetPassword(email: string, code: string, newPassword: st
   const raw = user ? await db.getSetting(`reset:${user.id}`) : null;
   const rec = raw ? (JSON.parse(raw) as { code: string; expires: number; attempts: number }) : null;
   if (!user || !rec || rec.expires < Date.now()) throw new Error("Invalid or expired code");
-  if (rec.attempts >= 5) { await db.setSetting(`reset:${user.id}`, ""); throw new Error("Too many attempts — request a new code"); }
+  if (rec.attempts >= 5) { await db.setSetting(`reset:${user.id}`, ""); throw new Error("Too many attempts, request a new code"); }
   if (rec.code !== code.trim()) { await db.setSetting(`reset:${user.id}`, JSON.stringify({ ...rec, attempts: rec.attempts + 1 })); throw new Error("Invalid or expired code"); }
   await db.updateUser(user.id, { passwordHash: hashPassword(newPassword) });
   await db.setSetting(`reset:${user.id}`, "");
@@ -304,7 +304,7 @@ export async function totpSetupConfirm(user: User, code: string): Promise<void> 
   const pending = await db.getSetting(`totp-pending:${user.id}`);
   if (!pending) throw new Error("Start 2FA setup first");
   const { totpVerify } = await import("./security");
-  if (!totpVerify(decrypt(pending), code)) throw new Error("Code does not match — check your authenticator app time");
+  if (!totpVerify(decrypt(pending), code)) throw new Error("Code does not match, check your authenticator app time");
   await db.setSetting(`totp:${user.id}`, pending);
   await db.setSetting(`totp-pending:${user.id}`, "");
 }
@@ -327,9 +327,9 @@ export async function addTeamMember(owner: User, email: string): Promise<void> {
   const team = await db.getTeamByOwner(owner.id);
   if (!team) throw new Error("You do not own a team");
   const members = await db.listTeamMembers(team.id);
-  if (members.length >= team.seats) throw new Error(`All ${team.seats} seats are used — buy more seats to add members`);
+  if (members.length >= team.seats) throw new Error(`All ${team.seats} seats are used, buy more seats to add members`);
   const u = await db.getUserByEmail(email);
-  if (!u) throw new Error("No account with that email — ask them to sign up first (free), then add them");
+  if (!u) throw new Error("No account with that email, ask them to sign up first (free), then add them");
   if (members.some((m) => m.id === u.id)) throw new Error("Already a member");
   await db.addTeamMember(team.id, u.id);
   const site = await getSite();

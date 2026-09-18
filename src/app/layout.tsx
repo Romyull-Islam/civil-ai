@@ -7,8 +7,9 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Civil AI — engineering assistant",
-  description: "AI assistant for civil & structural engineers: design, analysis, drawings (DXF), quantities, code references.",
+  title: "CivilMate: AI assistant for civil engineers",
+  description: "CivilMate: AI assistant for civil & structural engineers and architects. BNBC/IS/ACI design, analysis, DXF drawings, quantities and code references.",
+  applicationName: "CivilMate",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

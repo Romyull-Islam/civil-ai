@@ -149,7 +149,7 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
           emit({ type: "notice", message: `${PROVIDER_MAP.get(c.id)?.label ?? c.id} unavailable (${e.reason}); trying next provider…` });
           continue;
         }
-        emit({ type: "error", message: `The AI service returned an error — ${friendlyError(e instanceof Error ? e.message : String(e), PROVIDER_MAP.get(c.id)?.label)}. Try again or pick another model below.` });
+        emit({ type: "error", message: `The AI service returned an error: ${friendlyError(e instanceof Error ? e.message : String(e), PROVIDER_MAP.get(c.id)?.label)}. Try again or pick another model below.` });
         return;
       }
     }
@@ -199,7 +199,7 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
           emit({ type: "error", message: `The model repeated the same failing tool call three times (${call.name}). Last error: ${output.error}. Try rephrasing, or switch to a larger model.` });
           return;
         }
-        if (n === 2) output.error = `${output.error} — You already sent exactly these arguments and they failed. Change the argument NAMES to match the expected parameters listed above.`;
+        if (n === 2) output.error = `${output.error}. You already sent exactly these arguments and they failed. Change the argument NAMES to match the expected parameters listed above.`;
       }
       emit({ type: "tool_result", id: call.id, name: call.name, output });
       const content = output.error ? `ERROR: ${output.error}` : JSON.stringify({ summary: output.summary, result: output.result }, (_k, v) => (typeof v === "number" ? Number(v.toPrecision(6)) : v));

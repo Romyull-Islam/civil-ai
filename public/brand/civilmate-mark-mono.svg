@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="CivilMate">
+  <title>CivilMate</title>
+  
+  <rect x="2.00" y="2.00" width="60.00" height="60.00" rx="14.00" fill="#14171C"/>
+  <path d="M43.13 20.62 A17.00 17.00 0 1 0 43.13 43.38" fill="none" stroke="#FFFFFF" stroke-width="7.60" stroke-linecap="round"/>
+  <path d="M25.20 37.40 L36.80 37.40 M36.80 37.40 L31.00 27.40 M31.00 27.40 L25.20 37.40" fill="none" stroke="#FFFFFF" stroke-width="2.10" stroke-linejoin="round" opacity="0.95"/>
+  <circle cx="25.20" cy="37.40" r="2.90" fill="#FFFFFF"/><circle cx="36.80" cy="37.40" r="2.90" fill="#FFFFFF"/><circle cx="31.00" cy="27.40" r="2.90" fill="#FFFFFF"/>
+</svg>

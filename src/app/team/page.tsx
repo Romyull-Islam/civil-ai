@@ -19,7 +19,7 @@ export default function TeamPage() {
           <div className="card p-4 text-sm grid gap-1">
             <div className="font-medium">{t.team.name}</div>
             <div className="text-muted">Plan {t.plan?.name ?? t.team.plan} · {t.members.length} of {t.team.seats} seats used{t.team.expires ? ` · active until ${new Date(t.team.expires).toLocaleDateString()}` : ""}</div>
-            {t.owner && <div className="text-xs text-muted">You are the owner. Members must have a Civil AI account (free sign-up) before you add them. Need more seats? <Link className="text-accent2" href={`/subscribe?plan=${t.team.plan}`}>Buy seats / renew</Link>.</div>}
+            {t.owner && <div className="text-xs text-muted">You are the owner. Members must have a CivilMate account (free sign-up) before you add them. Need more seats? <Link className="text-accent2" href={`/subscribe?plan=${t.team.plan}`}>Buy seats / renew</Link>.</div>}
           </div>
           <div className="card p-4 text-sm grid gap-2">
             <div className="label">Members</div>

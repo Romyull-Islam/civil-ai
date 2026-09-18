@@ -168,14 +168,14 @@ export function designRcBeam(inp: RcBeamInput): RcBeamResult {
       const a = (AstRequired * fy) / (0.85 * fck * b);
       const c = a / beta1;
       const et = (0.003 * (d - c)) / c;
-      steps.push(`β1 = ${beta1.toFixed(3)}; solve Mu/φ = As·fy·(d − a/2) → As = ${AstRequired.toFixed(0)} mm², a = ${a.toFixed(1)} mm, c = ${c.toFixed(1)} mm, εt = ${et.toFixed(4)} (${et >= 0.005 ? "tension-controlled, φ = 0.9" : "NOT tension-controlled — increase section"})`);
+      steps.push(`β1 = ${beta1.toFixed(3)}; solve Mu/φ = As·fy·(d − a/2) → As = ${AstRequired.toFixed(0)} mm², a = ${a.toFixed(1)} mm, c = ${c.toFixed(1)} mm, εt = ${et.toFixed(4)} (${et >= 0.005 ? "tension-controlled, φ = 0.9" : "NOT tension-controlled; increase section"})`);
       checks.push({ name: "Tension-controlled (εt ≥ 0.005)", ok: et >= 0.005, detail: `εt = ${et.toFixed(4)}` });
       if (AstRequired > AstMax) singly = false;
     }
   }
 
   const AstDesign = Math.max(AstRequired, AstMin);
-  checks.push({ name: "Ast ≥ Ast,min", ok: AstRequired >= AstMin, detail: `Ast,min = ${AstMin.toFixed(0)} mm² (${AstRequired < AstMin ? "governs — provide Ast,min" : "ok"})` });
+  checks.push({ name: "Ast ≥ Ast,min", ok: AstRequired >= AstMin, detail: `Ast,min = ${AstMin.toFixed(0)} mm² (${AstRequired < AstMin ? "governs; provide Ast,min" : "ok"})` });
   checks.push({ name: "Ast ≤ Ast,max", ok: AstDesign <= AstMax, detail: `Ast,max = ${AstMax.toFixed(0)} mm²` });
 
   const tensionBars = chooseBars(AstDesign, b, cover, sd);
@@ -270,7 +270,7 @@ export function designRcColumn(inp: RcColumnInput): RcColumnResult {
   const lu = inp.unsupportedLength ?? 3000;
   const ratio = lu / Math.min(b, D);
   const short = ratio <= 12;
-  steps.push(`Slenderness lu/min(b,D) = ${ratio.toFixed(1)} → ${short ? "short column" : "slender column (moment magnification required — not covered here)"}`);
+  steps.push(`Slenderness lu/min(b,D) = ${ratio.toFixed(1)} → ${short ? "short column" : "slender column (moment magnification required; not covered here)"}`);
   let Asc: number;
   let capacityFn: (A: number) => number;
   if (code === "IS456") {

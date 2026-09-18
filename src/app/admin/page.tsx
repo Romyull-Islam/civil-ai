@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { Shield, KeyRound, Users, BarChart3, Layers, Save, RefreshCw, Wallet, LifeBuoy, Globe, LayoutDashboard, UsersRound, CreditCard, ExternalLink, CheckCircle2, Circle } from "lucide-react";
+import { Shield, KeyRound, Users, BarChart3, Layers, Save, RefreshCw, Wallet, LifeBuoy, Globe, LayoutDashboard, UsersRound, CreditCard, ExternalLink, CheckCircle2, Circle, Megaphone, Plus, Trash2 } from "lucide-react";
+import { PromoCard } from "@/components/PromoBanner";
+import type { Promo } from "@/lib/saas/site";
 import { friendlyModel, TIER_LABEL } from "@/lib/ai/friendly";
 import type { SiteSettings } from "@/lib/saas/site";
 import { PROVIDERS } from "@/lib/ai/registry";
@@ -8,14 +10,14 @@ import { DEFAULT_PLANS } from "@/lib/saas/plans";
 import { useSession } from "@/lib/client/session";
 import type { Plan } from "@/lib/saas/plans";
 
-type Tab = "overview" | "users" | "keys" | "plans" | "usage" | "payments" | "support" | "site" | "gateways" | "teams";
+type Tab = "overview" | "promos" | "users" | "keys" | "plans" | "usage" | "payments" | "support" | "site" | "gateways" | "teams";
 type Role = "superadmin" | "admin" | "support" | "user";
 interface AdminUser { id: string; email: string; name: string; role: Role; plan: string; planExpires: number | null; createdAt: number; disabled: number }
-const TAB_ROLES: Record<Tab, Role[]> = { overview: ["superadmin", "admin", "support"], gateways: ["superadmin", "admin"], teams: ["superadmin", "admin", "support"], users: ["superadmin", "admin", "support"], payments: ["superadmin", "admin", "support"], support: ["superadmin", "admin", "support"], keys: ["superadmin", "admin"], plans: ["superadmin", "admin"], site: ["superadmin", "admin"], usage: ["superadmin", "admin"] };
+const TAB_ROLES: Record<Tab, Role[]> = { overview: ["superadmin", "admin", "support"], promos: ["superadmin", "admin"], gateways: ["superadmin", "admin"], teams: ["superadmin", "admin", "support"], users: ["superadmin", "admin", "support"], payments: ["superadmin", "admin", "support"], support: ["superadmin", "admin", "support"], keys: ["superadmin", "admin"], plans: ["superadmin", "admin"], site: ["superadmin", "admin"], usage: ["superadmin", "admin"] };
 const GROUPS: { title: string; items: [Tab, typeof Users, string][] }[] = [
   { title: "", items: [["overview", LayoutDashboard, "Overview"]] },
   { title: "Customers", items: [["users", Users, "Users & plans"], ["payments", Wallet, "Payments"], ["support", LifeBuoy, "Support tickets"], ["teams", UsersRound, "Teams"]] },
-  { title: "Service setup", items: [["plans", Layers, "Plans & models"], ["keys", KeyRound, "AI provider keys"], ["gateways", CreditCard, "Payment gateways"], ["site", Globe, "Site, contacts & legal"]] },
+  { title: "Service setup", items: [["plans", Layers, "Plans & models"], ["keys", KeyRound, "AI provider keys"], ["gateways", CreditCard, "Payment gateways"], ["site", Globe, "Site, contacts & legal"], ["promos", Megaphone, "Banners & ads"]] },
   { title: "Reports", items: [["usage", BarChart3, "Usage"]] },
 ];
 const PREVIEWS: [string, string][] = [["/pricing", "Plans page"], ["/subscribe", "Checkout page"], ["/help", "Help & FAQ"], ["/terms", "Terms"], ["/privacy", "Privacy"], ["/refund-policy", "Refund policy"], ["/", "Assistant"]];
@@ -54,7 +56,7 @@ export default function AdminPage() {
       <div className="flex-1 min-w-0 overflow-y-auto"><div className="max-w-6xl mx-auto p-4 grid gap-4">
         <select className="select md:hidden" value={current} onChange={(e) => setTab(e.target.value as Tab)}>{GROUPS.flatMap((g) => g.items).filter(([id]) => allowed(id)).map(([id, , label]) => <option key={id} value={id}>{label}</option>)}</select>
         {current === "overview" && <OverviewTab go={setTab} admin={role !== "support"} />}
-        {current === "users" && <UsersTab me={s.user!} />}{current === "teams" && <TeamsTab />}{current === "payments" && <PaymentsTab />}{current === "support" && <SupportTab />}{current === "keys" && <KeysTab />}{current === "gateways" && <GatewaysTab />}{current === "plans" && <PlansTab />}{current === "site" && <SiteTab />}{current === "usage" && <UsageTab />}
+        {current === "users" && <UsersTab me={s.user!} />}{current === "teams" && <TeamsTab />}{current === "payments" && <PaymentsTab />}{current === "support" && <SupportTab />}{current === "keys" && <KeysTab />}{current === "gateways" && <GatewaysTab />}{current === "plans" && <PlansTab />}{current === "site" && <SiteTab />}{current === "usage" && <UsageTab />}{current === "promos" && <PromosTab />}
       </div></div>
     </div>
   );
@@ -146,7 +148,7 @@ function UsersTab({ me }: { me: { id: string; role: Role } }) {
         <thead><tr className="text-left text-xs text-muted"><th className="py-1">User</th><th>Role</th><th>Plan</th><th>Expires</th><th>Joined</th><th>Status</th></tr></thead>
         <tbody>{list.map((u) => (
           <tr key={u.id} className="border-t border-border">
-            <td className="py-1.5">{u.name || "—"}<div className="text-xs text-muted">{u.email}</div></td>
+            <td className="py-1.5">{u.name || "(no name)"}<div className="text-xs text-muted">{u.email}</div></td>
             <td>{superadmin && u.id !== me.id ? <select className="select !w-auto !py-0.5" value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })}><option value="user">user</option><option value="support">support</option><option value="admin">admin</option><option value="superadmin">superadmin</option></select> : <span className="badge">{u.role}</span>}</td>
             <td><select className="select !w-auto !py-0.5" value={u.plan} onChange={(e) => patch(u.id, { plan: e.target.value })}>{plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></td>
             <td><input className="input !w-40 !py-0.5" type="date" value={u.planExpires ? new Date(u.planExpires).toISOString().slice(0, 10) : ""} onChange={(e) => patch(u.id, { planExpires: e.target.value ? new Date(e.target.value).getTime() : null })} /></td>
@@ -171,8 +173,8 @@ function KeysTab() {
         <div key={p.id} className="card p-3 grid sm:grid-cols-[180px_1fr_auto] gap-2 items-center">
           <div><div className="font-medium text-sm">{p.label}</div><div className="text-xs text-muted">{status[p.id]?.set ? "stored key ✓" : status[p.id]?.fromEnv ? "from env ✓" : "no key"}</div></div>
           <div className="grid gap-1">
-            <input className="input" type="password" placeholder={status[p.id]?.set ? "•••••••• (stored) — paste to replace" : "paste API key"} value={draft[p.id]?.apiKey ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [p.id]: { ...d[p.id], apiKey: e.target.value } }))} autoComplete="off" />
-            {(p.baseUrlEnv || p.baseUrl) && <input className="input" placeholder={`base URL (default ${p.baseUrl ?? "—"})`} value={draft[p.id]?.baseUrl ?? status[p.id]?.baseUrl ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [p.id]: { ...d[p.id], baseUrl: e.target.value } }))} />}
+            <input className="input" type="password" placeholder={status[p.id]?.set ? "•••••••• (stored), paste to replace" : "paste API key"} value={draft[p.id]?.apiKey ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [p.id]: { ...d[p.id], apiKey: e.target.value } }))} autoComplete="off" />
+            {(p.baseUrlEnv || p.baseUrl) && <input className="input" placeholder={`base URL (default ${p.baseUrl ?? "none"})`} value={draft[p.id]?.baseUrl ?? status[p.id]?.baseUrl ?? ""} onChange={(e) => setDraft((d) => ({ ...d, [p.id]: { ...d[p.id], baseUrl: e.target.value } }))} />}
           </div>
           <div className="flex gap-1"><button className="btn btn-sm" onClick={() => save(p.id)} disabled={!draft[p.id]?.apiKey && draft[p.id]?.baseUrl === undefined}><Save size={13} /> Save</button>{status[p.id]?.set && <button className="btn btn-sm text-err" onClick={() => save(p.id, true)}>Clear</button>}</div>
         </div>
@@ -306,7 +308,7 @@ function SiteTabInner() {
       <div className="card p-4 grid sm:grid-cols-2 gap-3 text-sm">
         <h2 className="font-medium sm:col-span-2">Support & verification</h2>
         <div><label className="label">App name</label><input className="input mt-1" value={site.appName} onChange={(e) => set({ appName: e.target.value })} /></div>
-        <div><label className="label">Email verification</label><select className="select mt-1" value={site.requireEmailVerification} onChange={(e) => set({ requireEmailVerification: e.target.value as SiteSettings["requireEmailVerification"] })}><option value="auto">Auto (only when email sending is configured{emailOk ? " — configured ✓" : " — not configured"})</option><option value="always">Always</option><option value="never">Never</option></select></div>
+        <div><label className="label">Email verification</label><select className="select mt-1" value={site.requireEmailVerification} onChange={(e) => set({ requireEmailVerification: e.target.value as SiteSettings["requireEmailVerification"] })}><option value="auto">Auto (only when email sending is configured{emailOk ? ", configured ✓" : ", not configured"})</option><option value="always">Always</option><option value="never">Never</option></select></div>
         <div><label className="label">Support email</label><input className="input mt-1" value={site.supportEmail} onChange={(e) => set({ supportEmail: e.target.value })} placeholder="support@yourdomain.com" /></div>
         <div><label className="label">Support phone</label><input className="input mt-1" value={site.supportPhone} onChange={(e) => set({ supportPhone: e.target.value })} /></div>
         <div><label className="label">WhatsApp number</label><input className="input mt-1" value={site.whatsapp} onChange={(e) => set({ whatsapp: e.target.value })} placeholder="8801XXXXXXXXX" /></div>
@@ -330,9 +332,9 @@ function SiteTabInner() {
       <div className="card p-4 grid gap-3 text-sm">
         <h2 className="font-medium">Legal pages (required by payment gateways for merchant approval)</h2>
         <div className="grid sm:grid-cols-2 gap-2"><div><label className="label">Company / legal name</label><input className="input mt-1" value={site.companyName} onChange={(e) => set({ companyName: e.target.value })} placeholder="XYZ Engineering Ltd. (trade licence holder)" /></div><div><label className="label">Registered address</label><input className="input mt-1" value={site.companyAddress} onChange={(e) => set({ companyAddress: e.target.value })} /></div></div>
-        <div><label className="label">Terms of Service — /terms</label><textarea className="textarea mt-1 min-h-40 font-mono text-xs" value={site.terms} onChange={(e) => set({ terms: e.target.value })} /></div>
-        <div><label className="label">Privacy Policy — /privacy</label><textarea className="textarea mt-1 min-h-40 font-mono text-xs" value={site.privacy} onChange={(e) => set({ privacy: e.target.value })} /></div>
-        <div><label className="label">Refund & Cancellation Policy — /refund-policy</label><textarea className="textarea mt-1 min-h-32 font-mono text-xs" value={site.refundPolicy} onChange={(e) => set({ refundPolicy: e.target.value })} /></div>
+        <div><label className="label">Terms of Service (/terms)</label><textarea className="textarea mt-1 min-h-40 font-mono text-xs" value={site.terms} onChange={(e) => set({ terms: e.target.value })} /></div>
+        <div><label className="label">Privacy Policy (/privacy)</label><textarea className="textarea mt-1 min-h-40 font-mono text-xs" value={site.privacy} onChange={(e) => set({ privacy: e.target.value })} /></div>
+        <div><label className="label">Refund & Cancellation Policy (/refund-policy)</label><textarea className="textarea mt-1 min-h-32 font-mono text-xs" value={site.refundPolicy} onChange={(e) => set({ refundPolicy: e.target.value })} /></div>
       </div>
       {err && <div className="text-xs text-err">{err}</div>}
       <div className="flex gap-2 items-center"><button className="btn btn-primary" onClick={save}><Save size={14} /> Save settings</button>{saved && <span className="text-xs text-ok">saved</span>}</div>
@@ -348,10 +350,10 @@ function GatewaysTabInner() {
   const save = async (g: GW) => { const d = draft[g.id] ?? {}; const r = await fetch("/api/admin/gateways", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: g.id, enabled: d.enabled ?? g.enabled, sandbox: d.sandbox ?? g.sandbox, values: d.values ?? {} }) }); const j = await r.json(); setMsg(r.ok ? `${g.label} saved` : j.error); setDraft((x) => ({ ...x, [g.id]: {} })); load(); };
   return (
     <div className="grid gap-3">
-      <p className="text-xs text-muted">Online payment gateways activate plans instantly and enable automatic renewal (Stripe) — no manual approval. Credentials are encrypted. Use <b>sandbox</b> to test with the provider&apos;s test credentials, then switch to live once your merchant account is approved. Aggregators (SSLCommerz, aamarPay, shurjoPay) show bKash, Nagad, Rocket, Upay, cards and banks on their page; a direct bKash merchant API is also supported. Manual bKash/Nagad/Rocket numbers (Site settings) remain available as fallback.</p>
+      <p className="text-xs text-muted">Online payment gateways activate plans instantly and enable automatic renewal (Stripe) with no manual approval. Credentials are encrypted. Use <b>sandbox</b> to test with the provider&apos;s test credentials, then switch to live once your merchant account is approved. Aggregators (SSLCommerz, aamarPay, shurjoPay) show bKash, Nagad, Rocket, Upay, cards and banks on their page; a direct bKash merchant API is also supported. Manual bKash/Nagad/Rocket numbers (Site settings) remain available as fallback.</p>
       {list.map((g) => { const d = draft[g.id] ?? {}; const vals = { ...g.values, ...(d.values ?? {}) }; return (
         <div key={g.id} className="card p-4 grid gap-2 text-sm">
-          <div className="flex flex-wrap items-center gap-3"><span className="font-medium">{g.label}</span>{g.id === "sslcommerz" && <span className="badge text-ok border-ok/40">recommended for Bangladesh — cards + bKash + Nagad + Rocket + QR</span>}{g.fromEnv && <span className="badge">configured from environment</span>}<span className="text-xs text-muted">{g.methods}</span><a className="text-xs text-accent2" href={g.docs} target="_blank" rel="noreferrer">docs</a>
+          <div className="flex flex-wrap items-center gap-3"><span className="font-medium">{g.label}</span>{g.id === "sslcommerz" && <span className="badge text-ok border-ok/40">recommended for Bangladesh: cards + bKash + Nagad + Rocket + QR</span>}{g.fromEnv && <span className="badge">configured from environment</span>}<span className="text-xs text-muted">{g.methods}</span><a className="text-xs text-accent2" href={g.docs} target="_blank" rel="noreferrer">docs</a>
             <label className="ml-auto text-xs flex items-center gap-1"><input type="checkbox" checked={d.enabled ?? g.enabled} onChange={(e) => setDraft((x) => ({ ...x, [g.id]: { ...d, enabled: e.target.checked } }))} /> enabled</label>
             <label className="text-xs flex items-center gap-1"><input type="checkbox" checked={d.sandbox ?? g.sandbox} onChange={(e) => setDraft((x) => ({ ...x, [g.id]: { ...d, sandbox: e.target.checked } }))} /> sandbox / test mode</label></div>
           <div className="grid sm:grid-cols-2 gap-2">{g.fields.map((f) => <div key={f.key}><label className="label">{f.label}</label><input className="input mt-1" type={f.secret ? "password" : "text"} placeholder={f.placeholder} value={vals[f.key] ?? ""} onChange={(e) => setDraft((x) => ({ ...x, [g.id]: { ...d, values: { ...(d.values ?? {}), [f.key]: e.target.value } } }))} autoComplete="off" /></div>)}</div>
@@ -396,3 +398,45 @@ function TeamsTab() {
 
 function SiteTab() { return <div className="grid gap-3"><PreviewLinks only={["/help", "/terms", "/privacy", "/refund-policy", "/subscribe"]} /><SiteTabInner /></div>; }
 function GatewaysTab() { return <div className="grid gap-3"><PreviewLinks only={["/subscribe", "/pricing"]} /><GatewaysTabInner /></div>; }
+
+function PromosTab() {
+  const [site, setSite] = useState<SiteSettings | null>(null); const [stats, setStats] = useState<Record<string, { views: number; clicks: number }>>({}); const [msg, setMsg] = useState<string | null>(null);
+  const load = () => { fetch("/api/admin/site").then((r) => r.json()).then((j) => setSite(j.site)); fetch("/api/admin/promo-stats").then((r) => r.json()).then((j) => setStats(j.stats ?? {})); };
+  useEffect(() => { load(); }, []);
+  if (!site) return <div className="text-sm text-muted">Loading…</div>;
+  const promos = site.promos ?? [];
+  const setPromos = (list: Promo[]) => setSite({ ...site, promos: list });
+  const upd = (i: number, patch: Partial<Promo>) => setPromos(promos.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  const add = () => setPromos([...promos, { id: `banner-${Date.now().toString(36)}`, enabled: false, title: "", text: "", linkUrl: "", linkLabel: "Learn more", image: "", placement: "chat", audience: "free", startsAt: "", endsAt: "", dismissible: true, sponsored: true }]);
+  const onImage = (i: number, f: File | null) => { if (!f) return; if (f.size > 300 * 1024) { setMsg("Image is larger than 300 KB. Resize it or paste an https:// image link instead."); return; } const rd = new FileReader(); rd.onload = () => upd(i, { image: String(rd.result) }); rd.readAsDataURL(f); };
+  const save = async () => { setMsg(null); const r = await fetch("/api/admin/site", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ site }) }); const j = await r.json(); setMsg(r.ok ? "Saved. Changes appear for users within a minute." : j.error); if (r.ok) setSite(j.site); };
+  return (
+    <div className="grid gap-4">
+      <div><h1 className="text-lg font-semibold">Banners & ads</h1><p className="text-sm text-muted">Optional. Show a banner to free users (and visitors of shared chats), for example a sponsor such as a cement or steel brand, a supplier, a training course, or your own &quot;Upgrade to Pro&quot; offer. Paying customers can be excluded, and staff never see banners. Turn any banner off at any time.</p></div>
+      {promos.map((p, i) => { const st = stats[p.id] ?? { views: 0, clicks: 0 }; return (
+        <div key={p.id} className="card p-4 grid gap-3 text-sm">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={p.enabled} onChange={(e) => upd(i, { enabled: e.target.checked })} /> {p.enabled ? "Showing" : "Off"}</label>
+            <span className="text-xs text-muted">{st.views} views · {st.clicks} clicks{st.views ? ` · ${((100 * st.clicks) / st.views).toFixed(1)}% click rate` : ""}</span>
+            <button className="btn btn-sm text-err ml-auto" onClick={() => setPromos(promos.filter((_, j) => j !== i))}><Trash2 size={13} /> Remove</button>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-2">
+            <div><label className="label">Title</label><input className="input mt-1" value={p.title} onChange={(e) => upd(i, { title: e.target.value })} placeholder="Shah Cement, built to last" /></div>
+            <div><label className="label">Button text</label><input className="input mt-1" value={p.linkLabel} onChange={(e) => upd(i, { linkLabel: e.target.value })} /></div>
+            <div className="sm:col-span-2"><label className="label">Text (one or two lines)</label><input className="input mt-1" value={p.text} onChange={(e) => upd(i, { text: e.target.value })} placeholder="Special price for CivilMate engineers. Call 01XXXXXXXXX" /></div>
+            <div><label className="label">Link (opens in a new tab)</label><input className="input mt-1" value={p.linkUrl} onChange={(e) => upd(i, { linkUrl: e.target.value })} placeholder="https://…" /></div>
+            <div><label className="label">Image or logo (optional)</label><div className="flex gap-2 mt-1 items-center"><input type="file" accept="image/*" onChange={(e) => onImage(i, e.target.files?.[0] ?? null)} className="text-xs" /><input className="input" value={p.image.startsWith("data:") ? "(uploaded image)" : p.image} onChange={(e) => upd(i, { image: e.target.value })} placeholder="or https:// image link" />{p.image && <button className="btn btn-sm" onClick={() => upd(i, { image: "" })}>Clear</button>}</div></div>
+            <div><label className="label">Where</label><select className="select mt-1" value={p.placement} onChange={(e) => upd(i, { placement: e.target.value as Promo["placement"] })}><option value="chat">Above the chat box</option><option value="sidebar">Sidebar (small)</option><option value="share">Public shared-chat pages</option></select></div>
+            <div><label className="label">Who sees it</label><select className="select mt-1" value={p.audience} onChange={(e) => upd(i, { audience: e.target.value as Promo["audience"] })}><option value="free">Free users and visitors only</option><option value="everyone">All customers (incl. paid)</option></select></div>
+            <div><label className="label">Start date (optional)</label><input className="input mt-1" type="date" value={p.startsAt} onChange={(e) => upd(i, { startsAt: e.target.value })} /></div>
+            <div><label className="label">End date (optional)</label><input className="input mt-1" type="date" value={p.endsAt} onChange={(e) => upd(i, { endsAt: e.target.value })} /></div>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={p.dismissible} onChange={(e) => upd(i, { dismissible: e.target.checked })} /> Users can close it</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={p.sponsored} onChange={(e) => upd(i, { sponsored: e.target.checked })} /> Show &quot;Sponsored&quot; label (recommended for paid ads)</label>
+          </div>
+          <div><div className="label mb-1">Preview</div><div className={p.placement === "sidebar" ? "max-w-60" : ""}><PromoCard p={p} compact={p.placement === "sidebar"} onDismiss={p.dismissible ? () => {} : undefined} /></div></div>
+        </div>); })}
+      {!promos.length && <div className="card p-4 text-sm text-muted">No banners yet. Nothing is shown to users until you add one and switch it on.</div>}
+      <div className="flex gap-2 items-center"><button className="btn" onClick={add} disabled={promos.length >= 10}><Plus size={14} /> Add banner</button><button className="btn btn-primary" onClick={save}><Save size={14} /> Save banners</button>{msg && <span className="text-xs">{msg}</span>}</div>
+    </div>
+  );
+}

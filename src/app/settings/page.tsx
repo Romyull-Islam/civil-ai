@@ -19,8 +19,8 @@ export default function SettingsPage() {
   const [show, setShow] = useState<Record<string, boolean>>({});
   const [saved, setSaved] = useState(false);
   const [dataMsg, setDataMsg] = useState<string | null>(null);
-  const exportAll = async () => { const rows = await db.conversations.toArray(); const blob = new Blob([JSON.stringify({ app: "civil-ai", version: 1, exportedAt: new Date().toISOString(), conversations: rows }, null, 1)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `civil-ai-chats-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setDataMsg(`Exported ${rows.length} chats.`); };
-  const importFile = async (f: File | null) => { if (!f) return; try { const j = JSON.parse(await f.text()) as { conversations?: Conversation[] }; if (!Array.isArray(j.conversations)) throw new Error("bad file"); await db.conversations.bulkPut(j.conversations); window.dispatchEvent(new Event("civil-ai:conversations")); setDataMsg(`Imported ${j.conversations.length} chats.`); } catch { setDataMsg("That file is not a Civil AI chat export."); } };
+  const exportAll = async () => { const rows = await db.conversations.toArray(); const blob = new Blob([JSON.stringify({ app: "civil-ai", version: 1, exportedAt: new Date().toISOString(), conversations: rows }, null, 1)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `civilmate-chats-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setDataMsg(`Exported ${rows.length} chats.`); };
+  const importFile = async (f: File | null) => { if (!f) return; try { const j = JSON.parse(await f.text()) as { conversations?: Conversation[] }; if (!Array.isArray(j.conversations)) throw new Error("bad file"); await db.conversations.bulkPut(j.conversations); window.dispatchEvent(new Event("civil-ai:conversations")); setDataMsg(`Imported ${j.conversations.length} chats.`); } catch { setDataMsg("That file is not a CivilMate chat export."); } };
   const deleteAll = async () => { if (!confirm("Delete all conversations stored on this device? This cannot be undone.")) return; await db.conversations.clear(); window.dispatchEvent(new Event("civil-ai:conversations")); setDataMsg("All chats on this device were deleted."); };
   useEffect(() => { fetch("/api/health").then((r) => r.json()).then((j) => setEnvConfigured(j.providersFromEnv ?? [])).catch(() => {}); }, []);
   const update = (patch: Partial<AppSettings>) => { saveSettings({ ...s, ...patch }); setSaved(true); setTimeout(() => setSaved(false), 1200); };
@@ -79,7 +79,7 @@ export default function SettingsPage() {
                         <input className="input" type={show[p.id] ? "text" : "password"} value={k.apiKey ?? ""} placeholder={fromEnv ? "(using server key)" : "paste key"} onChange={(e) => setKey(p.id, { apiKey: e.target.value })} autoComplete="off" />
                         <button className="btn" onClick={() => setShow((v) => ({ ...v, [p.id]: !v[p.id] }))} aria-label="toggle">{show[p.id] ? <EyeOff size={14} /> : <Eye size={14} />}</button>
                       </div></div>
-                  ) : <div className="text-xs text-muted self-center">No key needed — runs locally.</div>}
+                  ) : <div className="text-xs text-muted self-center">No key needed, runs locally.</div>}
                   <button className="btn btn-sm" onClick={() => fetchModels(p.id)}><RefreshCw size={13} /> list live models</button>
                 </div>
                 {(p.baseUrlEnv || p.baseUrl) && (
@@ -87,7 +87,7 @@ export default function SettingsPage() {
                 )}
                 <div><label className="label">Preferred model for auto mode</label>
                   <input className="input mt-1" list={`auto-models-${p.id}`} value={k.model ?? ""} placeholder={p.models[0]?.id} onChange={(e) => setKey(p.id, { model: e.target.value })} />
-                  <datalist id={`auto-models-${p.id}`}>{p.models.map((m) => <option key={m.id} value={m.id}>{m.label}{m.note ? ` — ${m.note}` : ""}</option>)}{Array.isArray(live[p.id]) && (live[p.id] as string[]).map((m) => <option key={m} value={m} />)}</datalist>
+                  <datalist id={`auto-models-${p.id}`}>{p.models.map((m) => <option key={m.id} value={m.id}>{m.label}{m.note ? ` (${m.note})` : ""}</option>)}{Array.isArray(live[p.id]) && (live[p.id] as string[]).map((m) => <option key={m} value={m} />)}</datalist>
                 </div>
                 {typeof live[p.id] === "string" && <div className="text-xs text-muted">{live[p.id] as string}</div>}
                 {Array.isArray(live[p.id]) && <div className="text-xs text-muted max-h-24 overflow-y-auto">{(live[p.id] as string[]).length} models: {(live[p.id] as string[]).join(", ")}</div>}

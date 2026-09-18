@@ -319,3 +319,11 @@ describe("friendly provider errors", () => {
     expect(friendlyError(raw, "Google Gemini")).toBe("Google Gemini: schema must be a boolean or an object");
   });
 });
+
+describe("house style: no em dashes in displayed text", () => {
+  it("tidies prose but leaves code alone", async () => {
+    const { tidyDashes } = await import("@/components/Markdown");
+    expect(tidyDashes("Ast is 942 mm² — use 3 bars — ok")).toBe("Ast is 942 mm², use 3 bars, ok");
+    expect(tidyDashes("run `npm ci -- --flag` then — done")).toBe("run `npm ci -- --flag` then, done");
+  });
+});

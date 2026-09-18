@@ -2,7 +2,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
-import { Send, Square, Trash2, ImagePlus, X, Sparkles, CloudUpload } from "lucide-react";
+import { Send, Square, Trash2, ImagePlus, X, CloudUpload, Share2 } from "lucide-react";
+import { ShareDialog } from "./ShareDialog";
+import { PromoBanner } from "./PromoBanner";
+import { LogoMark } from "./Logo";
 import { db, type Conversation, type UIMessage } from "@/lib/db";
 import { useSettings } from "@/lib/client/settings";
 import { streamChat } from "@/lib/client/stream";
@@ -61,20 +64,21 @@ export function Chat() {
     return () => window.removeEventListener("civil-ai:conversations", check);
   }, [conv?.id]);
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const backup = async (c: Conversation, silent = false) => {
     const r = await fetch("/api/saves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id, kind: "chat", title: c.title, payload: c }) });
     const j = await r.json();
     if (!silent) { setBackupMsg(r.ok ? "Backed up to your account." : j.error); setTimeout(() => setBackupMsg(null), 4000); }
     if (r.ok) refreshSession().catch(() => {});
   };
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [conv?.messages.length, status]);
+  useEffect(() => { if (conv) bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [conv, conv?.messages.length, status]);
 
   const persist = useCallback(async (c: Conversation) => { await db.conversations.put(c); refreshList(); }, [refreshList]);
   const params = useSearchParams(); const router = useRouter();
   useEffect(() => {
     const c = params.get("c"); const fresh = params.get("new");
     if (fresh) queueMicrotask(() => { setConv(null); setInput(""); setImages([]); router.replace("/"); });
-    else if (c) db.conversations.get(c).then((row) => { if (row) { setConv(row); db.conversations.update(c, { updatedAt: now() }).catch(() => {}); } router.replace("/"); });
+    else if (c) { const wantShare = params.get("share") === "1"; db.conversations.get(c).then((row) => { if (row) { setConv(row); if (wantShare) setShareOpen(true); db.conversations.update(c, { updatedAt: now() }).catch(() => {}); } router.replace("/"); }); }
   }, [params, router]);
 
   const deleteConversation = async (id: string) => { await db.conversations.delete(id); if (conv?.id === id) setConv(null); refreshList(); };
@@ -142,20 +146,22 @@ export function Chat() {
             <div className="font-medium text-sm truncate flex-1" title={conv.title}>{conv.title}</div>
             {backupMsg && <span className="text-xs text-ok">{backupMsg}</span>}
             {session?.mode === "saas" && (session.cloudQuota?.limitBytes ?? 0) > 0 && <button className="btn btn-sm" onClick={() => backup(conv)} title="Back up this chat to my account"><CloudUpload size={14} /> <span className="hidden sm:inline">Back up</span></button>}
+            <button className="btn btn-sm" onClick={() => setShareOpen(true)} title="Share or download this chat"><Share2 size={14} /> <span className="hidden sm:inline">Share</span></button>
             <button className="btn btn-sm" onClick={() => { if (confirm("Delete this conversation?")) deleteConversation(conv.id); }} title="Delete this chat"><Trash2 size={14} /></button>
           </div>
         )}
+        {shareOpen && conv && <ShareDialog conv={conv} onClose={() => setShareOpen(false)} />}
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto px-4 py-6 grid gap-4">
             {!conv && (
               <div className="grid gap-4 mt-6">
                 <div className="text-center">
-                  <Sparkles className="inline text-accent" size={28} />
+                  <LogoMark size={44} className="inline-block" />
                   <h1 className="text-xl font-semibold mt-2">What are we building today?</h1>
                   <p className="text-xs text-muted mt-1">Common Bangladeshi jobs first (BNBC 2020, RAJUK, psi / katha / cft), then international examples.</p>
                   <p className="text-sm text-muted mt-1">Ask for designs, analysis, drawings, quantities, code clauses or site advice. Calculations run in verified engineering tools, not in the language model.</p>
                   {session?.mode === "byok" && <p className="text-xs text-muted mt-2">No key yet? Open Settings and add a free Gemini or Groq key, or run Ollama locally.</p>}
-                  {session?.mode === "desktop" && <p className="text-xs text-muted mt-2">Works offline with the built-in model. Link your Civil AI account in Settings for stronger cloud models.</p>}
+                  {session?.mode === "desktop" && <p className="text-xs text-muted mt-2">Works offline with the built-in model. Link your CivilMate account in Settings for stronger cloud models.</p>}
                 </div>
                 {session?.mode !== "saas" && <LocalAI compact />}
                 <div className="grid sm:grid-cols-2 gap-2">
@@ -170,6 +176,7 @@ export function Chat() {
         </div>
         <div className="border-t border-border bg-bg/80 backdrop-blur">
           <div className="max-w-4xl mx-auto px-4 pt-3 pb-5 grid gap-2">
+            {session?.mode === "saas" && !busy && <PromoBanner placement="chat" />}
             {images.length > 0 && (
               <div className="flex gap-2 flex-wrap">
                 {images.map((im, i) => (
@@ -184,7 +191,7 @@ export function Chat() {
             <div className="rounded-2xl border border-border bg-elev shadow-lg shadow-black/20 focus-within:border-accent2 transition">
               <textarea
                 className="w-full bg-transparent border-0 outline-none resize-none px-4 pt-4 pb-2 text-base leading-6 min-h-[64px] max-h-[240px] placeholder:text-muted"
-                placeholder="Ask anything — design a 230×450 beam for 80 kN·m, draw a 400×400 column with 8T16, plan a 2-storey house on a 10×12 m plot…"
+                placeholder="Ask anything, e.g. design a 230×450 beam for 80 kN·m, draw a 400×400 column with 8T16, plan a 2-storey house on a 10×12 m plot…"
                 value={input}
                 rows={2}
                 onChange={(e) => { setInput(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(240, e.target.scrollHeight) + "px"; }}

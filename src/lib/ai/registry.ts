@@ -57,7 +57,7 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: "glm-4.5-flash", label: "GLM 4.5 Flash (free)", free: true },
       { id: "glm-4.6v-flash", label: "GLM 4.6V Flash (free, vision)", free: true, vision: true },
     ] },
-  { id: "siliconflow", label: "SiliconFlow", kind: "openai", keyEnv: "SILICONFLOW_API_KEY", baseUrlEnv: "SILICONFLOW_BASE_URL", keyUrl: "https://cloud.siliconflow.com/account/ak", baseUrl: "https://api.siliconflow.com/v1", freeTier: "Some models permanently free (Qwen3-8B, DeepSeek-R1-Distill-7B) plus ~$1 signup credit; China platform (.cn) gives ¥14 credit. Free list rotates — check the console.", requiresKey: true,
+  { id: "siliconflow", label: "SiliconFlow", kind: "openai", keyEnv: "SILICONFLOW_API_KEY", baseUrlEnv: "SILICONFLOW_BASE_URL", keyUrl: "https://cloud.siliconflow.com/account/ak", baseUrl: "https://api.siliconflow.com/v1", freeTier: "Some models permanently free (Qwen3-8B, DeepSeek-R1-Distill-7B) plus ~$1 signup credit; China platform (.cn) gives ¥14 credit. Free list rotates, check the console.", requiresKey: true,
     models: [
       { id: "Qwen/Qwen3-8B", label: "Qwen3 8B (free)", free: true },
       { id: "deepseek-ai/DeepSeek-V3.2", label: "DeepSeek V3.2 (paid, cheap)" },

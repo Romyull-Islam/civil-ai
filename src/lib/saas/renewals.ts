@@ -27,7 +27,7 @@ export async function runRenewalReminders(baseUrl = process.env.NEXT_PUBLIC_APP_
     const text = stage === "grace"
       ? `Your ${plan.name} plan expired on ${new Date(u.planExpires).toDateString()}. It keeps working for ${plan.graceDays ?? 3} more days. Renew here: ${renew}\n\nAfter that your account returns to the Free plan (your data stays).`
       : `Your ${plan.name} plan expires in ${st.daysLeft} day${st.daysLeft === 1 ? "" : "s"} (${new Date(u.planExpires).toDateString()}). Renew here: ${renew}\n\nPay by bKash / Nagad / Rocket / bank and submit the transaction ID; we activate within 24 hours.`;
-    await sendEmail(u.email, `${site.appName}: ${stage === "grace" ? "plan expired — renew" : "plan renewal reminder"}`, `Hello ${u.name || ""}\n\n${text}`);
+    await sendEmail(u.email, `${site.appName}: ${stage === "grace" ? "plan expired, please renew" : "plan renewal reminder"}`, `Hello ${u.name || ""}\n\n${text}`);
     await db.setSetting(key, String(Date.now()));
     sent.push(`${u.email}:${stage}`);
   }

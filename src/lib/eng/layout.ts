@@ -139,7 +139,7 @@ export function planLayout(inp: LayoutInput): LayoutResult {
     const area = r.w * r.l;
     checks.push({ name: `${r.name}: ${m.label}`, ok: area >= m.area - 1e-6 && Math.min(r.w, r.l) >= m.width - 1e-6, detail: `${r.w.toFixed(2)} × ${r.l.toFixed(2)} m = ${area.toFixed(1)} m²` });
   }
-  notes.push(`Plot ${inp.plotWidth} × ${inp.plotDepth} m = ${plot.toFixed(1)} m²; setbacks front ${sb.front} / rear ${sb.rear} / side ${sb.side} m. Coverage and FAR limits depend on the local bye-laws — verify with the municipality.`);
+  notes.push(`Plot ${inp.plotWidth} × ${inp.plotDepth} m = ${plot.toFixed(1)} m²; setbacks front ${sb.front} / rear ${sb.rear} / side ${sb.side} m. Coverage and FAR limits depend on the local bye-laws, verify with the municipality.`);
   return { rooms, buildable, builtUpArea: builtUp, carpetArea: carpet, coveragePercent: (100 * builtUp) / plot, far: builtUp / plot, checks, notes };
 }
 
@@ -200,7 +200,7 @@ function plotRect(p: BuildingInput["plot"]): { width: number; depth: number; not
     const xs = p.points.map((q) => q[0]), ys = p.points.map((q) => q[1]);
     const w = Math.max(...xs) - Math.min(...xs), d = Math.max(...ys) - Math.min(...ys);
     // shrink to ~85% to stay inside typical irregular boundaries
-    return { width: w * 0.85, depth: d * 0.85, note: `Irregular plot (${p.points.length} corners): planned on an inscribed ${(w * 0.85).toFixed(1)} × ${(d * 0.85).toFixed(1)} m rectangle — verify against the actual boundary.` };
+    return { width: w * 0.85, depth: d * 0.85, note: `Irregular plot (${p.points.length} corners): planned on an inscribed ${(w * 0.85).toFixed(1)} × ${(d * 0.85).toFixed(1)} m rectangle, verify against the actual boundary.` };
   }
   if (p.shape === "square") { const s = p.width ?? p.depth ?? 10; return { width: s, depth: s }; }
   return { width: p.width ?? 10, depth: p.depth ?? 12 };
@@ -267,10 +267,10 @@ export function planBuilding(inp: BuildingInput): { floors: FloorPlanResult[]; s
   }
   const footprint = Math.max(...floors.map((f) => f.layout.builtUpArea));
   const stats = plotStats(plotArea, storeys, footprint, inp.maxCoveragePercent, inp.maxFAR);
-  const checks: LayoutResult["checks"] = floors.flatMap((f) => f.layout.checks.map((c) => ({ ...c, name: `${f.floor} — ${c.name}` })));
+  const checks: LayoutResult["checks"] = floors.flatMap((f) => f.layout.checks.map((c) => ({ ...c, name: `${f.floor}: ${c.name}` })));
   if (inp.maxCoveragePercent !== undefined) checks.push({ name: "Ground coverage limit", ok: !!stats.coverageOk, detail: `${stats.coveragePercent.toFixed(1)}% vs ${inp.maxCoveragePercent}% allowed` });
   if (inp.maxFAR !== undefined) checks.push({ name: "FAR limit", ok: !!stats.farOk, detail: `${stats.far.toFixed(2)} vs ${inp.maxFAR} allowed` });
-  notes.push(`Setbacks used: front ${sb.front} m, rear ${sb.rear} m, side ${sb.side} m (${inp.setback ? "as given" : "defaults by plot size — confirm with local bye-laws"}). Front/road side: ${front}.`);
+  notes.push(`Setbacks used: front ${sb.front} m, rear ${sb.rear} m, side ${sb.side} m (${inp.setback ? "as given" : "defaults by plot size, confirm with local bye-laws"}). Front/road side: ${front}.`);
   notes.push(...floors[0].layout.notes.filter((n) => !/^Plot/.test(n)));
   return { floors, summary: { plotArea, footprint, storeys, builtUp: stats.builtUp, coveragePercent: stats.coveragePercent, far: stats.far, carpetPerFloor: floors.map((f) => ({ floor: f.floor, carpet: f.layout.carpetArea, rooms: f.layout.rooms.filter((r) => !r.open).length })) }, checks, notes };
 }

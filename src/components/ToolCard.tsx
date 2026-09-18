@@ -46,7 +46,7 @@ export function ToolCard({ name, args, output, pending }: { name: string; args: 
           {d.checks?.length ? (
             <div className="grid gap-1 mt-1">
               {d.checks.map((c, i) => (
-                <div key={i} className="flex items-start gap-2 text-xs">{c.ok ? <CheckCircle2 size={14} className="text-ok mt-0.5 shrink-0" /> : <XCircle size={14} className="text-err mt-0.5 shrink-0" />}<span><b>{c.name}</b> — {c.detail}</span></div>
+                <div key={i} className="flex items-start gap-2 text-xs">{c.ok ? <CheckCircle2 size={14} className="text-ok mt-0.5 shrink-0" /> : <XCircle size={14} className="text-err mt-0.5 shrink-0" />}<span><b>{c.name}:</b> {c.detail}</span></div>
               ))}
             </div>
           ) : null}

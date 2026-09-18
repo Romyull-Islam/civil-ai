@@ -1,6 +1,23 @@
 /** Admin-editable site settings: support contacts, payment instructions (bKash/Nagad/Rocket/QR/bank), FAQ, verification policy. */
 import { getDB } from "./db";
 
+/** Optional banners/ads shown to free users (or everyone) — e.g. sponsors, own promotions, partner offers. */
+export interface Promo {
+  id: string;
+  enabled: boolean;
+  title: string;
+  text: string;
+  linkUrl: string;
+  linkLabel: string;
+  image: string; // https URL or small data: URL (≤ 300 KB)
+  placement: "chat" | "sidebar" | "share"; // above the chat box · in the sidebar · on public shared-chat pages
+  audience: "free" | "everyone"; // free & signed-out users only, or all customers (staff never see ads)
+  startsAt: string; // YYYY-MM-DD or ""
+  endsAt: string;
+  dismissible: boolean;
+  sponsored: boolean; // shows a small "Sponsored" label
+}
+
 export interface SiteSettings {
   appName: string;
   supportEmail: string;
@@ -15,10 +32,11 @@ export interface SiteSettings {
   terms: string; // markdown
   privacy: string; // markdown
   refundPolicy: string; // markdown
+  promos: Promo[];
 }
 
 export const DEFAULT_SITE: SiteSettings = {
-  appName: "Civil AI",
+  appName: "CivilMate",
   supportEmail: "",
   supportPhone: "",
   whatsapp: "",
@@ -26,7 +44,7 @@ export const DEFAULT_SITE: SiteSettings = {
   payment: { bkash: "", nagad: "", rocket: "", bank: "", qrImage: "", note: "Send the exact amount, then submit the Transaction ID below. Plans are activated within 24 hours after we verify the payment.", currency: "BDT", conversion: 1 },
   faq: `## Frequently asked questions
 
-**What is Civil AI?** An assistant for civil, structural and construction engineers and architects. Calculations are done by verified engineering code; the AI explains, selects the right calculator and draws.
+**What is CivilMate?** An assistant for civil, structural and construction engineers and architects. Calculations are done by verified engineering code; the AI explains, selects the right calculator and draws.
 
 **Is it free?** Calculators, drawings and the code library are free. The AI assistant has a free daily allowance; Pro and Business plans give more requests, stronger models and the offline desktop model.
 
@@ -35,12 +53,13 @@ export const DEFAULT_SITE: SiteSettings = {
 **How do I cancel?** Plans are prepaid for a period and do not auto-renew. Simply don't renew; your account returns to Free when the period ends. Refunds are handled through support tickets.
 
 **Are the results safe to build from?** No. They are preliminary. A licensed engineer must verify every design against the applicable local code.`,
-  cancellationPolicy: "Prepaid plans end automatically at the expiry date; there is no auto-renewal and nothing to cancel. Refund requests within 7 days of payment are considered case by case — open a support ticket with your transaction ID.",
+  cancellationPolicy: "Prepaid plans end automatically at the expiry date; there is no auto-renewal and nothing to cancel. Refund requests within 7 days of payment are considered case by case, open a support ticket with your transaction ID.",
   companyName: "",
   companyAddress: "",
+  promos: [],
   terms: `## Terms of Service
 
-1. **Service.** Civil AI provides engineering calculators, drawing generators, a building-code reference library and an AI assistant for civil, structural and construction professionals. Outputs are preliminary aids: every design must be checked and approved by a licensed engineer against the applicable local code before use in construction. We accept no liability for construction decisions.
+1. **Service.** CivilMate provides engineering calculators, drawing generators, a building-code reference library and an AI assistant for civil, structural and construction professionals. Outputs are preliminary aids: every design must be checked and approved by a licensed engineer against the applicable local code before use in construction. We accept no liability for construction decisions.
 2. **Accounts.** You must provide a valid email address, keep your password confidential and be at least 18 years old. Staff of a Team plan are added by the team owner.
 3. **Plans and payment.** Paid plans are prepaid for the stated period (usually 30 days) and activate after payment confirmation. Prices are shown in Bangladeshi Taka (BDT) including applicable taxes unless stated otherwise; international card payments may be charged in USD. Plans do not renew automatically unless you enable a recurring card subscription.
 4. **Fair use.** Daily AI request limits apply per plan. Automated bulk use, resale of access or attempts to extract provider API keys are prohibited.
@@ -49,7 +68,7 @@ export const DEFAULT_SITE: SiteSettings = {
 7. **Governing law.** These terms are governed by the laws of Bangladesh.`,
   privacy: `## Privacy Policy
 
-- **What we collect:** name, email address, password (hashed), plan and payment records (transaction IDs, amounts — never card numbers, which are handled by the payment gateway), support tickets, and daily usage counters.
+- **What we collect:** name, email address, password (hashed), plan and payment records (transaction IDs, amounts, never card numbers, which are handled by the payment gateway), support tickets, and daily usage counters.
 - **What we do not store:** your chat conversations. They stay in your browser or desktop app. Requests to the AI assistant are sent to the AI provider selected by your plan (for example Google, Groq, Alibaba Cloud, Anthropic) to generate the answer and are subject to that provider's API terms; we do not use them for training.
 - **Cookies:** one session cookie to keep you signed in; no advertising trackers.
 - **Emails:** verification codes, payment confirmations, renewal reminders and support replies only.
