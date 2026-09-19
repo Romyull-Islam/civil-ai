@@ -8,6 +8,7 @@ import type { SiteSettings } from "@/lib/saas/site";
 import { PROVIDERS } from "@/lib/ai/registry";
 import { DEFAULT_PLANS, planModels } from "@/lib/saas/plans";
 import { CREDIT_USD, USD_TO_BDT, estimateCredits, modelPrice } from "@/lib/saas/credits";
+import { modelQuality, type QualityStatus } from "@/lib/ai/quality";
 import { useSession } from "@/lib/client/session";
 import type { Plan } from "@/lib/saas/plans";
 
@@ -223,12 +224,16 @@ function PlansTab() {
             <div className="flex items-center gap-4 pt-5"><label className="flex items-center gap-1"><input type="checkbox" checked={p.vision} onChange={(e) => upd(i, { vision: e.target.checked })} /> image input</label><label className="flex items-center gap-1"><input type="checkbox" checked={p.localAI} onChange={(e) => upd(i, { localAI: e.target.checked })} /> offline model (desktop)</label></div>
           </div>
           <PlanBudget plan={p} />
-          <div><label className="label">Models available to subscribers (≈ credits per typical question)</label>
+          <div><label className="label">Models available to subscribers (≈ credits per typical question; hover a model for its engineering test result)</label>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-1">
               {PROVIDERS.filter((pr) => pr.id !== "local" && pr.id !== "ollama").map((pr) => (
                 <div key={pr.id} className="border border-border rounded-lg p-2">
                   <div className="text-xs font-medium flex items-center gap-2">{pr.label}{keys[pr.id] && !(keys[pr.id].set || keys[pr.id].fromEnv) && <span className="text-err">no key</span>}</div>
-                  {pr.models.map((m) => { const f = friendlyModel(pr.id, m.id, m.label); return <label key={m.id} className="flex items-center gap-1 text-xs mt-1"><input type="checkbox" checked={!!p.providers.find((x) => x.provider === pr.id)?.models.includes(m.id)} onChange={() => toggleModel(i, pr.id, m.id)} /> {f.name} <span className="text-muted">({TIER_LABEL[f.tier]}, ≈{fmtCredits(estimateCredits(pr.id, m.id))}{modelPrice(pr.id, m.id).known ? "" : ", price unknown: charged at $3/$15"})</span></label>; })}
+                  {pr.models.map((m) => { const f = friendlyModel(pr.id, m.id, m.label); const qa = modelQuality(pr.id, m.id); const ticked = !!p.providers.find((x) => x.provider === pr.id)?.models.includes(m.id); return (
+                    <label key={m.id} className="flex items-start gap-1 text-xs mt-1" title={`Engineering benchmark: ${qa.evidence}`}>
+                      <input className="mt-0.5" type="checkbox" checked={ticked} disabled={qa.status === "rejected" && !ticked} onChange={() => toggleModel(i, pr.id, m.id)} />
+                      <span>{f.name} <span className="text-muted">({TIER_LABEL[f.tier]}, ≈{fmtCredits(estimateCredits(pr.id, m.id))}{modelPrice(pr.id, m.id).known ? "" : ", price unknown: charged at $3/$15"})</span> <QualityBadge status={qa.status} /></span>
+                    </label>); })}
                 </div>
               ))}
             </div>
@@ -241,6 +246,12 @@ function PlansTab() {
       {err && <div className="text-xs text-err">{err}</div>}
     </div>
   );
+}
+
+function QualityBadge({ status }: { status: QualityStatus }) {
+  if (status === "approved") return <span className="text-ok">✓ passed test</span>;
+  if (status === "rejected") return <span className="text-err">✗ failed test, never used</span>;
+  return <span className="text-accent">not yet proven</span>;
 }
 
 const fmtCredits = (c: number) => `${c < 10 ? c.toFixed(1) : Math.round(c)} credit${c === 1 ? "" : "s"}`;

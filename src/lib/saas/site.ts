@@ -48,7 +48,7 @@ export const DEFAULT_SITE: SiteSettings = {
 
 **Is it free?** Calculators, drawings and the code library are free and unlimited. The AI assistant has a free monthly allowance of AI credits; Pro, Max and Team plans give more credits, stronger models and the offline desktop model.
 
-**What are AI credits?** Each AI answer uses credits according to the model you pick and how much it has to read and write. A quick question on a Fast model uses about 1 credit; the Best models use about 10. The chooser under the chat box shows the typical cost of each model, and your remaining credits.
+**What are AI credits?** Each AI answer uses credits according to the model you pick and how much it has to read and write. A typical engineering question uses about 2 credits on GPT-OSS 120B, about 4 on Gemini Flash-Lite and about 10 on Gemini 3.8 Flash. The chooser under the chat box shows the typical cost of each model, and your remaining credits.
 
 **Can I use my credits any time in the month?** Yes. Your monthly credits can be spent whenever you need them, with two limits so a single day cannot use everything: a limit per 5-hour session (the session starts with your first question) and a weekly limit. Your Account page shows all three with the time each one refills. An answer that has started always finishes, even if it goes slightly over. The offline model in the desktop app does not use credits.
 

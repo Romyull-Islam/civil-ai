@@ -147,6 +147,14 @@ describe("quantities", () => {
   it("Bangladesh standard bricks ≈ 11.5 per cft (default)", () => { close(brickMasonry(1).bricksPerCft, 11.52, 0.01); });
 });
 
+describe("house plans keep NBC minimum sizes", () => {
+  it("5 katha (40 × 90 ft) two-storey house with garage and dining passes every check", () => {
+    const r = planBuilding({ plot: { shape: "rectangular", width: 12.19, depth: 27.43 }, storeys: 2, bedrooms: 3, garage: true, dining: true } as Parameters<typeof planBuilding>[0]);
+    expect(r.floors).toHaveLength(2);
+    expect(r.checks.filter((c) => !c.ok)).toEqual([]);
+  });
+});
+
 describe("tool routing", () => {
   const names = (q: string) => selectToolsForText(q).map((t) => t.name);
   it("routes common Bangladeshi questions to the right tools with a small tool set", () => {

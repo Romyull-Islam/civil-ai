@@ -93,14 +93,25 @@ export function planLayout(inp: LayoutInput): LayoutResult {
     if (r.l > bandDepthMax) { notes.push(`${r.name}: depth reduced from ${r.l.toFixed(2)} m to fit the plot; width increased to keep area.`); const area = r.w * r.l; r.l = bandDepthMax; r.w = area / r.l; }
     bands[band].rooms.push(r); bands[band].used += r.w + t;
   }
-  // If a band overflows the width, scale room widths proportionally in that band (keeping areas by growing depth where possible).
+  // If a band overflows the width, narrow its rooms proportionally (keeping areas by growing depth where possible),
+  // but never below the NBC minimum width for the room kind (e.g. a garage stays ≥ 3.0 m wide): rooms that would go
+  // under their minimum are held at it and the others take up the difference.
   for (const b of bands) {
     if (b.used > innerW && b.rooms.length) {
-      const widths = b.rooms.reduce((sum, r) => sum + r.w, 0);
-      const k = (innerW - b.rooms.length * t) / widths;
-      for (const r of b.rooms) { const area = r.w * r.l; r.w *= k; r.l = Math.min(bandDepthMax, area / r.w); }
+      const minW = (r: (typeof reqs)[number]) => Math.min(r.w, NBC_MIN[r.kind].width);
+      const held = new Set<(typeof reqs)[number]>();
+      let k = 1;
+      for (let pass = 0; pass <= b.rooms.length; pass++) {
+        const free = b.rooms.filter((r) => !held.has(r));
+        const avail = innerW - b.rooms.length * t - [...held].reduce((sum, r) => sum + minW(r), 0);
+        k = free.length ? avail / free.reduce((sum, r) => sum + r.w, 0) : 1;
+        const under = free.filter((r) => r.w * k < minW(r));
+        if (!under.length) break;
+        under.forEach((r) => held.add(r));
+      }
+      for (const r of b.rooms) { const area = r.w * r.l; r.w = held.has(r) ? minW(r) : r.w * k; r.l = Math.min(bandDepthMax, Math.max(r.l, area / r.w)); }
       b.used = b.rooms.reduce((s, r) => s + r.w + t, 0);
-      notes.push("Rooms in one band were narrowed to fit the plot width; check minimum widths below.");
+      notes.push("Rooms in one band were narrowed to fit the plot width (not below NBC minimum widths); check the sizes below.");
     }
   }
   const bandDepth = (i: number) => Math.max(0, ...bands[i].rooms.map((r) => r.l));

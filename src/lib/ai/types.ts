@@ -34,7 +34,7 @@ export interface Provider { streamTurn(req: ProviderRequest): Promise<ProviderTu
 
 /** Error thrown by adapters when the request should fall through to the next provider in the chain. */
 export class ProviderUnavailableError extends Error {
-  constructor(message: string, public readonly provider: string, public readonly reason: "no_key" | "rate_limit" | "auth" | "network" | "model" | "other") { super(message); this.name = "ProviderUnavailableError"; }
+  constructor(message: string, public readonly provider: string, public readonly reason: "no_key" | "rate_limit" | "overloaded" | "auth" | "network" | "model" | "other") { super(message); this.name = "ProviderUnavailableError"; }
 }
 
 /** Server-sent events emitted by the agent loop to the UI. */

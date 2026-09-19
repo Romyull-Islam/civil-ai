@@ -55,6 +55,7 @@ export const geminiProvider: Provider = {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (/\b50[03]\b|UNAVAILABLE|overloaded|high demand|try again later/i.test(msg)) throw new ProviderUnavailableError("Gemini is overloaded right now", "gemini", "overloaded");
       if (/429|RESOURCE_EXHAUSTED|quota/i.test(msg)) throw new ProviderUnavailableError(`Gemini quota/rate limit: ${msg.slice(0, 200)}`, "gemini", "rate_limit");
       if (/API key|401|403|PERMISSION_DENIED|UNAUTHENTICATED/i.test(msg)) throw new ProviderUnavailableError("Gemini API key invalid", "gemini", "auth");
       if (/404|not found|NOT_FOUND/i.test(msg)) throw new ProviderUnavailableError(`Gemini model not found: ${req.model}`, "gemini", "model");

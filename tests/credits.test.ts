@@ -29,6 +29,11 @@ describe("credit pricing", () => {
     const daily = { ...legacy, id: "gold", dailyCredits: 100 } as unknown as Plan;
     expect(withCreditDefaults(daily)).toMatchObject({ monthlyCredits: 1000, weeklyCredits: 400, sessionCredits: 120 });
   });
+  it("default plans only offer models that have not failed the engineering benchmark", async () => {
+    const { isUsable } = await import("@/lib/ai/quality");
+    const { planModels } = await import("@/lib/saas/plans");
+    for (const p of DEFAULT_PLANS) for (const m of planModels(p)) expect(isUsable(m.provider, m.model), `${p.id}: ${m.model}`).toBe(true);
+  });
   it("every default plan lets a user spend the month in a few weeks but not in one sitting", () => {
     for (const p of DEFAULT_PLANS) {
       expect(p.weeklyCredits * 4, p.id).toBeGreaterThan(p.monthlyCredits);
@@ -71,8 +76,8 @@ describe("quota against a real database", () => {
     const t0 = Date.parse("2026-09-15T02:00:00Z"); // Tuesday, first day of the third week of September
     const H = 3600000;
     let q = await quota(user, t0);
-    expect(q.session).toMatchObject({ used: 0, limit: 10, resetsAt: null });
-    expect(q.remaining).toBe(10);
+    expect(q.session).toMatchObject({ used: 0, limit: 8, resetsAt: null });
+    expect(q.remaining).toBe(8);
 
     // one question on Gemini 3.5 Flash-Lite in two model calls ≈ 4.25 credits; the session starts now
     await recordUsage(user.id, "gemini", "gemini-3.5-flash-lite", 10000, 500, true, t0);
@@ -82,33 +87,30 @@ describe("quota against a real database", () => {
     expect(q.session.resetsAt).toBe(t0 + 5 * H);
     expect((await db.getUsage(user.id, "2026-09-15")).requests).toBe(1);
 
-    // spend the rest of the session (10 credits)
+    // two more questions go past the 8-credit session limit (the answer that started is still finished)
     await recordUsage(user.id, "gemini", "gemini-3.8-flash", 5000, 500, true, t0 + 2 * H); // ≈ 2.8
     await recordUsage(user.id, "gemini", "gemini-3.8-flash", 6000, 400, true, t0 + 2 * H); // ≈ 3.0
     q = await quota(user, t0 + 3 * H);
     expect(q.blockedBy).toBe("session");
-    expect(limitMessage(q)).toMatch(/5-hour session.*new session starts/);
+    expect(limitMessage(q)).toMatch(/8-credit limit for this 5-hour session.*new session starts/);
 
-    // after 5 hours a new session begins; weekly usage carries on
+    // after 5 hours a new session begins; the week keeps counting (15 − 10.05 left)
     q = await quota(user, t0 + 6 * H);
     expect(q.session.used).toBe(0);
     expect(q.week.used).toBeCloseTo(10.05, 1);
-    expect(q.remaining).toBe(10);
+    expect(q.remaining).toBeCloseTo(4.95, 1);
 
-    // several sessions later in the same week: weekly limit (25) binds
-    for (let k = 0; k < 2; k++) await recordUsage(user.id, "anthropic", "claude-haiku-4-5", 4000, 400, true, t0 + (6 + 6 * k) * H); // 3 each
-    await recordUsage(user.id, "anthropic", "claude-haiku-4-5", 12000, 800, true, t0 + 18 * H); // 8
-    q = await quota(user, t0 + 19 * H);
-    expect(q.week.used).toBeGreaterThanOrEqual(24);
-    await recordUsage(user.id, "anthropic", "claude-haiku-4-5", 2000, 200, true, t0 + 30 * H);
+    // two Claude Haiku questions later that week pass the 15-credit weekly limit
+    await recordUsage(user.id, "anthropic", "claude-haiku-4-5", 4000, 400, true, t0 + 6 * H); // 3
+    await recordUsage(user.id, "anthropic", "claude-haiku-4-5", 4000, 400, true, t0 + 30 * H); // 3
     q = await quota(user, t0 + 31 * H);
     expect(q.blockedBy).toBe("week");
-    expect(limitMessage(q)).toMatch(/this week's limit of 25.*monthly credits are kept/);
+    expect(limitMessage(q)).toMatch(/this week's limit of 15.*monthly credits are kept/);
 
     // next week the weekly limit refills, the month keeps counting
     q = await quota(user, Date.parse("2026-09-22T03:00:00Z"));
     expect(q.week.used).toBe(0);
-    expect(q.period.used).toBeGreaterThanOrEqual(25);
+    expect(q.period.used).toBeCloseTo(16.05, 1);
     expect(q.blockedBy).toBeNull();
   });
 });

@@ -4,6 +4,7 @@ import { getSessionUser, publicUser, quota, publicUsage, getPlans, renewalState,
 import { startRenewalScheduler } from "@/lib/saas/renewals";
 import { gravatar, quotaFor } from "@/lib/saas/saves";
 import { planModels } from "@/lib/saas/plans";
+import { isUsable } from "@/lib/ai/quality";
 export const runtime = "nodejs";
 export async function GET(req: Request) {
   const mode = appMode();
@@ -18,7 +19,7 @@ export async function GET(req: Request) {
   // Models on higher plans (for the locked section of the model chooser): cheapest plan that offers each one.
   // Only offer models whose provider has an API key (stored by an admin or set in the environment); others would fail.
   const keys = await keyStatus();
-  const usable = (m: { provider: string }) => m.provider === "local" || m.provider === "ollama" || !!(keys[m.provider]?.set || keys[m.provider]?.fromEnv);
+  const usable = (m: { provider: string; model: string }) => isUsable(m.provider, m.model) && (m.provider === "local" || m.provider === "ollama" || !!(keys[m.provider]?.set || keys[m.provider]?.fromEnv));
   const allowedModels = planModels(q.plan).filter(usable);
   const allowedKeys = new Set(planModels(q.plan).map((m) => `${m.provider}/${m.model}`));
   const upgradeModels: { provider: string; model: string; plan: string; planId: string }[] = [];

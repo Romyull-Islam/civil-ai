@@ -146,21 +146,29 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
     // mid-answer (quota, request too large), the next model in the chain can carry on. Never after text has streamed.
     const tryList: Cand[] = active ? cands.slice(cands.indexOf(active)) : cands;
     const failures: string[] = [];
-    for (const c of tryList) {
+    candidates: for (const c of tryList) {
       const p = providerFor(c.id);
-      try {
-        if (c !== active) emit({ type: "provider", provider: c.id, model: c.model });
-        turn = await p.streamTurn({ model: c.model, apiKey: c.apiKey, baseUrl: c.baseUrl, system, messages, tools, signal: opts.signal, onText: (d) => { streamedText += d; emit({ type: "text", delta: d }); } });
-        active = c; provider = p;
-        break;
-      } catch (e) {
-        if (e instanceof ProviderUnavailableError && !streamedText) {
-          failures.push(`${c.id}: ${e.message}`);
-          emit({ type: "notice", message: `${PROVIDER_MAP.get(c.id)?.label ?? c.id} unavailable (${e.reason}); trying next provider…` });
-          continue;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          if (c !== active && attempt === 0) emit({ type: "provider", provider: c.id, model: c.model });
+          turn = await p.streamTurn({ model: c.model, apiKey: c.apiKey, baseUrl: c.baseUrl, system, messages, tools, signal: opts.signal, onText: (d) => { streamedText += d; emit({ type: "text", delta: d }); } });
+          active = c; provider = p;
+          break candidates;
+        } catch (e) {
+          // A temporary overload ("high demand") usually clears within seconds: retry the same model once before moving on.
+          if (e instanceof ProviderUnavailableError && e.reason === "overloaded" && attempt === 0 && !streamedText) {
+            emit({ type: "notice", message: `${PROVIDER_MAP.get(c.id)?.label ?? c.id} is busy; retrying…` });
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+          if (e instanceof ProviderUnavailableError && !streamedText) {
+            failures.push(`${c.id}: ${e.message}`);
+            emit({ type: "notice", message: `${PROVIDER_MAP.get(c.id)?.label ?? c.id} unavailable (${e.reason}); trying next provider…` });
+            continue candidates;
+          }
+          emit({ type: "error", message: `The AI service returned an error: ${friendlyError(e instanceof Error ? e.message : String(e), PROVIDER_MAP.get(c.id)?.label)}. Try again or pick another model below.` });
+          return;
         }
-        emit({ type: "error", message: `The AI service returned an error: ${friendlyError(e instanceof Error ? e.message : String(e), PROVIDER_MAP.get(c.id)?.label)}. Try again or pick another model below.` });
-        return;
       }
     }
     if (!turn || !active || !provider) {

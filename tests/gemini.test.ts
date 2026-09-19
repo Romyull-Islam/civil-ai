@@ -102,3 +102,27 @@ describe("grounding retry", () => {
     expect(events.some((e) => e.type === "notice" && /did not come from a calculation/.test(e.message))).toBe(false);
   });
 });
+
+describe("overloaded provider", () => {
+  it("retries the same model once after a 503, then answers", async () => {
+    let calls = 0;
+    const srv = http.createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        calls++;
+        if (calls === 1) { res.writeHead(503, { "content-type": "application/json" }); res.end(JSON.stringify({ error: { code: 503, message: "This model is currently experiencing high demand.", status: "UNAVAILABLE" } })); return; }
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.end(`data: ${JSON.stringify({ candidates: [{ content: { role: "model", parts: [{ text: "Hello there, how can I help with your project today?" }] }, finishReason: "STOP" }] })}\n\n`);
+      });
+    });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const { port } = srv.address() as AddressInfo;
+    const events: AgentEvent[] = [];
+    try {
+      await runAgent({ messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }], provider: "gemini", model: "gemini-3.5-flash-lite", keys: { gemini: { apiKey: "test", baseUrl: `http://127.0.0.1:${port}` } }, emit: (e) => events.push(e) });
+    } finally { srv.close(); }
+    expect(calls).toBe(2);
+    expect(events.some((e) => e.type === "notice" && /busy; retrying/.test(e.message))).toBe(true);
+    expect(events.some((e) => e.type === "error")).toBe(false);
+  }, 15000);
+});

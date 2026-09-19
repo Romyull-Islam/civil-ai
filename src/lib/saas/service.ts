@@ -2,6 +2,7 @@ import { getDB, isStaff, type User, type Role, type Team } from "./db";
 import { hashPassword, verifyPassword, newId, newToken, encrypt, decrypt } from "./crypto";
 import { DEFAULT_PLANS, planModels, withCreditDefaults, type Plan } from "./plans";
 import { creditsFor } from "./credits";
+import { isUsable } from "@/lib/ai/quality";
 import { PROVIDERS, type KeyBag } from "@/lib/ai/registry";
 import { sendEmail, emailConfigured } from "./email";
 import { getSite } from "./site";
@@ -338,7 +339,9 @@ export async function recordUsage(userId: string, provider: string, model: strin
 
 /** Pick provider/model for a SaaS request: honour the user's choice if the plan allows it, else the plan default. */
 export function chooseModel(plan: Plan, requestedProvider?: string, requestedModel?: string): { provider: string; model: string; chain: { provider: string; model: string }[] } {
-  const allowed = planModels(plan);
+  // Models that failed the engineering benchmark are never used, even if an admin ticked them (see lib/ai/quality.ts).
+  const allowed = planModels(plan).filter((m) => isUsable(m.provider, m.model));
+  if (!allowed.length) throw new Error(`No approved AI model is set up for the ${plan.name} plan yet. Please contact support.`);
   const hit = allowed.find((a) => a.provider === requestedProvider && (!requestedModel || a.model === requestedModel));
   const first = hit ?? allowed[0];
   // fallback chain: the chosen one first, then the other allowed models

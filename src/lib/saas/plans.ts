@@ -37,18 +37,23 @@ export interface Plan {
   minSeats?: number;
 }
 
+/**
+ * Model lists hold only models that have not failed the engineering benchmark (lib/ai/quality.ts). The first model of the
+ * first provider is the "Auto" default; the first model of each other provider is the fallback when that one is busy.
+ * Credit budgets: worst case (every credit spent) stays ≤ 45% of the price; typical questions per month shown in features.
+ */
 export const DEFAULT_PLANS: Plan[] = [
-  { id: "free", name: "Free", priceMonthly: 0, priceUSD: 0, currency: "BDT", monthlyCredits: 60, weeklyCredits: 25, sessionCredits: 10, sessionHours: 5, vision: false, localAI: false, cloudStorageMB: 0, maxSavedItems: 0,
-    providers: [{ provider: "groq", models: ["openai/gpt-oss-20b"] }, { provider: "gemini", models: ["gemini-3.5-flash-lite"] }],
-    features: ["All calculators, drawings and code library", "60 AI credits / month (about 60 quick questions), up to 10 per 5-hour session", "Standard models"] },
+  { id: "free", name: "Free", priceMonthly: 0, priceUSD: 0, currency: "BDT", monthlyCredits: 40, weeklyCredits: 15, sessionCredits: 8, sessionHours: 5, vision: false, localAI: false, cloudStorageMB: 0, maxSavedItems: 0,
+    providers: [{ provider: "gemini", models: ["gemini-3.5-flash-lite"] }, { provider: "groq", models: ["openai/gpt-oss-120b"] }],
+    features: ["All calculators, drawings and code library, unlimited", "40 AI credits / month (about 10 engineering questions)", "Gemini Flash-Lite"] },
   { id: "pro", name: "Pro", priceMonthly: 300, priceUSD: 2.8, currency: "BDT", monthlyCredits: 500, weeklyCredits: 200, sessionCredits: 60, sessionHours: 5, vision: true, localAI: true, periodDays: 30, cloudStorageMB: 20, maxSavedItems: 300,
-    providers: [{ provider: "groq", models: ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"] }, { provider: "gemini", models: ["gemini-3.5-flash-lite", "gemini-3.8-flash"] }],
-    features: ["500 AI credits / month (about 250 questions on the Smart model), use them any week you need, up to 200 a week", "Strong models (GPT-OSS 120B, Gemini 3.8 Flash, Qwen 3.8)", "Photo & drawing image analysis", "Cloud backup of chats & designs (20 MB ≈ 400 chats)", "Offline local model in the desktop app (unlimited)", "Email support"] },
+    providers: [{ provider: "gemini", models: ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite"] }, { provider: "groq", models: ["openai/gpt-oss-120b"] }],
+    features: ["500 AI credits / month (about 115 questions on Gemini Flash-Lite, or 250 on GPT-OSS 120B)", "Use them any week you need, up to 200 a week", "Gemini 3.8 Flash for hard questions", "Photo & drawing image analysis", "Cloud backup of chats & designs (20 MB ≈ 400 chats)", "Offline local model in the desktop app (unlimited)", "Email support"] },
   { id: "max", name: "Max", priceMonthly: 1000, priceUSD: 8, currency: "BDT", monthlyCredits: 1700, weeklyCredits: 680, sessionCredits: 200, sessionHours: 5, vision: true, localAI: true, periodDays: 30, cloudStorageMB: 50, maxSavedItems: 500,
-    providers: [{ provider: "groq", models: ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"] }, { provider: "gemini", models: ["gemini-3.8-flash", "gemini-3.5-flash-lite"] }, { provider: "anthropic", models: ["claude-haiku-4-5", "claude-sonnet-5"] }],
-    features: ["1,700 AI credits / month, up to 680 a week", "Premium models incl. Claude Sonnet 5", "Cloud backup of chats & designs (50 MB ≈ 1,000 chats)", "Offline local model in the desktop app (unlimited)", "Priority support"] },
+    providers: [{ provider: "gemini", models: ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite"] }, { provider: "groq", models: ["openai/gpt-oss-120b"] }, { provider: "anthropic", models: ["claude-haiku-4-5", "claude-sonnet-5"] }],
+    features: ["1,700 AI credits / month (about 400 questions on Gemini Flash-Lite), up to 680 a week", "Premium models incl. Claude Sonnet 5", "Cloud backup of chats & designs (50 MB ≈ 1,000 chats)", "Offline local model in the desktop app (unlimited)", "Priority support"] },
   { id: "team", name: "Team / Enterprise", priceMonthly: 800, priceUSD: 6.5, currency: "BDT", monthlyCredits: 1200, weeklyCredits: 480, sessionCredits: 150, sessionHours: 5, vision: true, localAI: true, periodDays: 30, graceDays: 5, perSeat: true, minSeats: 3, cloudStorageMB: 50, maxSavedItems: 500,
-    providers: [{ provider: "groq", models: ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"] }, { provider: "gemini", models: ["gemini-3.8-flash", "gemini-3.5-flash-lite"] }, { provider: "anthropic", models: ["claude-haiku-4-5", "claude-sonnet-5"] }],
+    providers: [{ provider: "gemini", models: ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite"] }, { provider: "groq", models: ["openai/gpt-oss-120b"] }, { provider: "anthropic", models: ["claude-haiku-4-5", "claude-sonnet-5"] }],
     features: ["1,200 AI credits / month for every team member, up to 480 a week", "৳800 per user / month (min 3 users)", "Owner adds and removes members", "One invoice for the whole team", "Priority support"] },
 ];
 

@@ -41,7 +41,8 @@ export async function POST(req: Request) {
     if (!user.emailVerified) return Response.json({ error: "Please verify your email address first (check your inbox for the code)." }, { status: 403 });
     const q = await quota(user);
     if (q.remaining <= 0) return Response.json({ error: limitMessage(q) }, { status: 429 });
-    const choice = chooseModel(q.plan, body.provider, body.model);
+    let choice: ReturnType<typeof chooseModel>;
+    try { choice = chooseModel(q.plan, body.provider, body.model); } catch (e) { return Response.json({ error: (e as Error).message }, { status: 503 }); }
     provider = choice.provider; model = choice.model;
     // Server-held keys only; the client's keys are ignored. Per-provider preferred models come from the plan.
     keys = await getServerKeys();
