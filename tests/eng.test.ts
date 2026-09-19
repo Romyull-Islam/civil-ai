@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { analyzeBeam, rectI } from "@/lib/eng/beam";
 import { convert } from "@/lib/eng/units";
-import { designRcBeam, designRcColumn, designOneWaySlab, designIsolatedFooting, tauC_IS } from "@/lib/eng/rc";
+import { designRcBeam, designOneWaySlab, designIsolatedFooting, tauC_IS } from "@/lib/eng/rc";
+import { designColumn, perimeterBars, sectionResponse } from "@/lib/eng/column";
+import { isSteelStress, strainLimits, phiTied } from "@/lib/eng/rcCode";
 import { terzaghiFactors, bearingCapacity } from "@/lib/eng/soil";
 import { concreteMaterials, rebarKgPerM, brickMasonry } from "@/lib/eng/quantity";
 import { averageEndArea, prismoidal, gridCutFill } from "@/lib/eng/earthwork";
@@ -11,7 +13,7 @@ import { evaluate } from "@/lib/eng/calc";
 import { runTool, selectToolsForText, TOOLS, toolJsonSchema } from "@/lib/tools";
 import { recommendModel, type Hardware } from "@/lib/local";
 import { stripLeakedReasoning, compactHistory, friendlyError } from "@/lib/ai/agent";
-import { planLayout, planBuilding } from "@/lib/eng/layout";
+import { planLayout, planBuilding, dhakaRules2025 } from "@/lib/eng/layout";
 import { toDxf } from "@/lib/drawing/dxf";
 import { toSvg } from "@/lib/drawing/svg";
 import { beamSection, floorPlan, footingDrawing } from "@/lib/drawing/templates";
@@ -68,42 +70,95 @@ describe("units", () => {
 });
 
 describe("RC design", () => {
-  it("IS 456 singly reinforced beam", () => {
-    const r = designRcBeam({ b: 300, D: 500, cover: 25, fck: 20, fy: 415, Mu: 120, Vu: 100 });
+  it("IS 456 singly reinforced beam matches the Annex G closed form", () => {
+    const r = designRcBeam({ code: "IS456", b: 300, D: 500, cover: 25, fck: 20, fy: 415, Mu: 120, Vu: 100 });
     expect(r.singlyReinforced).toBe(true);
-    // verify Ast satisfies Mu = 0.87 fy Ast d (1 - fy Ast/(fck b d))
-    const Ast = r.AstRequired, d = r.d;
-    const M = 0.87 * 415 * Ast * d * (1 - (415 * Ast) / (20 * 300 * d)) / 1e6;
-    close(M, 120, 0.02);
-    expect(r.tensionBars.length).toBeGreaterThan(0);
+    // IS 456 G-1.1(b): Ast = 0.5·fck/fy·[1 − √(1 − 4.6·Mu/(fck·b·d²))]·b·d, d = 500 − 25 − 8 − 8 = 459 → 827.9 mm²
+    close(r.d, 459, 0.001);
+    close(r.AstRequired, 827.9, 0.002);
     expect(r.shear!.stirrupSpacing).toBeLessThanOrEqual(300);
   });
-  it("IS 456 doubly reinforced when Mu > Mu,lim", () => {
-    const r = designRcBeam({ b: 250, D: 450, fck: 20, fy: 415, Mu: 250 });
+  it("compression steel stress follows SP-16 Table F (Fe415 and Fe500, d'/d = 0.05 to 0.20)", () => {
+    const tableF: [number, number, number][] = [[415, 0.05, 355], [415, 0.1, 353], [415, 0.15, 342], [415, 0.2, 329], [500, 0.05, 424], [500, 0.1, 412], [500, 0.15, 395], [500, 0.2, 370]];
+    for (const [fy, r, fsc] of tableF) {
+      const k = fy === 415 ? 0.48 : 0.46;
+      close(isSteelStress(fy, (0.0035 * (k - r)) / k), fsc, 0.006);
+    }
+  });
+  it("IS 456 doubly reinforced beam uses fsc from strain", () => {
+    const r = designRcBeam({ code: "IS456", b: 250, D: 450, fck: 20, fy: 415, Mu: 250 });
     expect(r.singlyReinforced).toBe(false);
+    expect(r.steps.join(" ")).toMatch(/fsc = 3[45]\d MPa/);
+    // equilibrium: Mu,lim + Asc·(fsc − 0.446fck)·(d − d') = Mu
     expect(r.AscRequired).toBeGreaterThan(0);
   });
-  it("ACI beam", () => {
-    const r = designRcBeam({ code: "ACI318", b: 300, D: 550, cover: 40, fck: 28, fy: 420, Mu: 200, Vu: 150 });
-    expect(r.AstRequired).toBeGreaterThan(r.AstMin);
-    expect(r.checks.find((c) => c.name.includes("Tension"))!.ok).toBe(true);
+  it("IS 456 Table 19 shear strength τc", () => {
+    const t19: [number, number, number][] = [[20, 0.25, 0.36], [20, 0.5, 0.48], [20, 0.75, 0.56], [20, 1.0, 0.62], [20, 1.5, 0.72], [20, 2.0, 0.79], [25, 0.25, 0.36], [25, 0.5, 0.49], [25, 1.0, 0.64], [25, 2.0, 0.82], [25, 3.0, 0.92], [30, 1.0, 0.66]];
+    for (const [f, p, t] of t19) expect(Math.abs(tauC_IS(f, p) - t)).toBeLessThanOrEqual(0.015);
   });
-  it("tau_c matches IS 456 Table 19 (M20, pt=1%: 0.62)", () => { close(tauC_IS(20, 1.0), 0.62, 0.03); });
-  it("column IS 456", () => {
-    const r = designRcColumn({ b: 300, D: 400, fck: 25, fy: 500, Pu: 1500 });
-    expect(r.steelPercent).toBeGreaterThanOrEqual(0.8);
-    expect(r.capacity).toBeGreaterThanOrEqual(1500);
+  it("BNBC/ACI beam: Whitney block equilibrium, tension-controlled, stirrup yield capped at 420 MPa", () => {
+    const r = designRcBeam({ code: "BNBC2020", b: 300, D: 500, fck: 25, fy: 500, Mu: 180, Vu: 150 });
+    const a = (r.AstRequired * 500) / (0.85 * 25 * 300);
+    close((0.9 * r.AstRequired * 500 * (r.d - a / 2)) / 1e6, 180, 0.002);
+    expect(r.steps.join(" ")).toMatch(/fyt = 420 MPa/);
+    const deep = designRcBeam({ code: "BNBC2020", b: 250, D: 400, fck: 25, fy: 420, Mu: 260 });
+    expect(deep.singlyReinforced).toBe(false);
+    expect(deep.AscRequired).toBeGreaterThan(0);
   });
-  it("one-way slab", () => {
-    const r = designOneWaySlab({ span: 3.5, liveLoad: 3, fck: 20, fy: 415 });
-    expect(r.thickness).toBeGreaterThanOrEqual(120);
-    expect(r.deflectionCheck.ok).toBe(true);
-    expect(r.mainBars).toMatch(/Ø10 @ \d+/);
+  it("ACI 318-19 uses εty + 0.003 for tension control; BNBC (ACI 318-11) uses 0.005", () => {
+    expect(strainLimits("ACI318", 520).tension).toBeCloseTo(0.0056, 4);
+    expect(strainLimits("BNBC2020", 520).tension).toBe(0.005);
+    expect(phiTied("BNBC2020", 420, 0.0021)).toBeCloseTo(0.65, 2);
+    expect(phiTied("BNBC2020", 420, 0.005)).toBe(0.9);
   });
-  it("isolated footing", () => {
-    const r = designIsolatedFooting({ columnB: 300, columnD: 400, serviceLoad: 800, safeBearingCapacity: 200, fck: 20, fy: 415 });
-    expect(r.side).toBeGreaterThanOrEqual(2.1);
-    expect(r.oneWayShear.ok && r.punchingShear.ok).toBe(true);
+  it("column interaction points agree with an independent strain-compatibility analysis (concreteproperties)", () => {
+    // reference values computed with the open-source concreteproperties library for the same bar positions
+    const aci = { b: 400, h: 400, bars: perimeterBars(400, 400, 12, 25, 40, 10) };
+    const r1 = sectionResponse("ACI318", aci, 35, 420, "x", 240);
+    close(r1.P / 1e3, 2739.6, 0.002); close(r1.M / 1e6, 417.8, 0.002);
+    const is = { b: 300, h: 500, bars: perimeterBars(300, 500, 10, 20, 40, 8) };
+    const r2 = sectionResponse("IS456", is, 25, 500, "x", 300);
+    close(r2.P / 1e3, 1021.3, 0.003); close(r2.M / 1e6, 246.5, 0.003);
+  });
+  it("column design: biaxial BNBC column, slender columns get magnified moments, sway columns are refused", () => {
+    const r = designColumn({ code: "BNBC2020", b: 300, h: 450, fc: 25, fy: 420, Pu: 1500, Mux: 120, Muy: 40, lu: 3000, curvature: "double", endMomentRatio: 0.5 });
+    expect(r.ok).toBe(true);
+    // with the conservative default (single curvature, equal end moments) the same column is too slender about y:
+    const tooSlender = designColumn({ code: "BNBC2020", b: 300, h: 450, fc: 25, fy: 420, Pu: 1500, Mux: 120, Muy: 40, lu: 3000 });
+    expect(tooSlender.ok).toBe(false);
+    expect(tooSlender.checks.some((c) => /Second-order/.test(c.name) && !c.ok)).toBe(true);
+    expect(tooSlender.checks.filter((c) => !c.ok).every((c) => /Second-order/.test(c.name))).toBe(true); // only the size check fails
+    expect(tooSlender.bars.percent).toBeLessThanOrEqual(6); // strength is met within the BNBC 6% maximum
+    expect(r.capacity.biaxialRatio!).toBeLessThanOrEqual(1);
+    // hand check: Ec = 4700√28 = 24 870 MPa, Ig = 300⁴/12
+    const slender = designColumn({ code: "ACI318", b: 300, h: 300, fc: 28, fy: 420, Pu: 500, Mux: 40, lu: 3500, bars: { count: 8, dia: 20 } });
+    // EI = min(0.4EcIg, 0.2EcIg + Es·Ise)/1.6 = 4.007e12 (Ise = 6 bars × 314 mm² × 90²) → Pc = 3228 kN, δns = 1.260
+    expect(slender.steps.join(" ")).toMatch(/Pc = 322[78] kN, Cm = 1\.00, δns = 1\.26\d/);
+    close(slender.designMoments.x, 1.2603 * 40, 0.004);
+    const veryslender = designColumn({ code: "ACI318", b: 300, h: 300, fc: 28, fy: 420, Pu: 900, Mux: 40, lu: 4500, bars: { count: 8, dia: 20 } });
+    expect(veryslender.checks.some((c) => /Second-order/.test(c.name) && !c.ok)).toBe(true); // δns = 2.42 > 1.4
+    const sway = designColumn({ code: "BNBC2020", b: 300, h: 300, fc: 25, fy: 420, Pu: 800, Mux: 50, lu: 4000, braced: false, bars: { count: 8, dia: 20 } });
+    expect(sway.checks.some((c) => /Sway/.test(c.name) && !c.ok)).toBe(true);
+    const isCol = designColumn({ code: "IS456", b: 300, h: 400, fc: 25, fy: 500, Pu: 1500, lu: 3000 });
+    expect(isCol.ok).toBe(true);
+    expect(isCol.steps.join(" ")).toMatch(/e,min = 20\.0 mm/); // max(3000/500 + 400/30 = 19.3, 20)
+    expect(isCol.bars.percent).toBeGreaterThanOrEqual(0.8);
+  });
+  it("one-way slab: BNBC minimum thickness table and brick-aggregate minimum steel", () => {
+    const r = designOneWaySlab({ code: "BNBC2020", span: 3.6, liveLoad: 2, fck: 25, fy: 420, support: "one_end_continuous" });
+    expect(r.thickness).toBe(150); // 3600/24
+    const khoa = designOneWaySlab({ code: "BNBC2020", span: 3.6, liveLoad: 2, fck: 25, fy: 420, support: "one_end_continuous", brickAggregate: true });
+    close(khoa.AstMin, 1.5 * 0.0018 * 1000 * 150, 0.001);
+    const is = designOneWaySlab({ code: "IS456", span: 3.5, liveLoad: 3, fck: 20, fy: 415 });
+    expect(is.deflectionCheck.ok).toBe(true);
+    expect(is.mainBars).toMatch(/Ø10 @ \d+/);
+  });
+  it("isolated footing passes shear, development and bearing checks in every code", () => {
+    for (const code of ["BNBC2020", "ACI318", "IS456"] as const) {
+      const r = designIsolatedFooting({ code, columnB: 300, columnD: 400, deadLoad: 600, liveLoad: 200, safeBearingCapacity: 200, fck: 25, fy: 420 });
+      expect(r.checks.every((c) => c.ok), code).toBe(true);
+      expect(r.side).toBeGreaterThanOrEqual(2.1);
+    }
   });
 });
 
@@ -155,6 +210,21 @@ describe("house plans keep NBC minimum sizes", () => {
   });
 });
 
+describe("BNBC 2020 planning rules and Dhaka 2025 by-laws", () => {
+  it("habitable rooms must be 2.9 m wide under BNBC (2.4 m under NBC India)", () => {
+    const rooms = [{ name: "Bedroom", width: 2.6, length: 4 }];
+    const bnbc = planLayout({ plotWidth: 12, plotDepth: 15, rooms });
+    expect(bnbc.checks.find((c) => /Bedroom/.test(c.name))!.ok).toBe(false);
+    const nbc = planLayout({ plotWidth: 12, plotDepth: 15, rooms, standard: "NBC2016" });
+    expect(nbc.checks.find((c) => /Bedroom/.test(c.name))!.ok).toBe(true);
+  });
+  it("Dhaka 2025: setbacks by storeys, coverage by plot size, FAR by road width", () => {
+    expect(dhakaRules2025(334.5, 6, 6)).toMatchObject({ setback: { front: 1.5, side: 1.0, rear: 1.25 }, maxCoverage: 62.5, farByRoad: 3.25 });
+    expect(dhakaRules2025(120, 9, 3)).toMatchObject({ setback: { front: 3.0, side: 1.25, rear: 2.0 }, maxCoverage: 70, farByRoad: 1.75 });
+    expect(dhakaRules2025(1500, 12, 24)).toMatchObject({ setback: { side: 3.0, rear: 3.0 }, maxCoverage: 45, farByRoad: 4.75 });
+  });
+});
+
 describe("tool routing", () => {
   const names = (q: string) => selectToolsForText(q).map((t) => t.name);
   it("routes common Bangladeshi questions to the right tools with a small tool set", () => {
@@ -179,11 +249,11 @@ describe("earthwork", () => {
 });
 
 describe("steel", () => {
-  it("cantilever ISMB 300: Md 148.1, deflection ≈ 28 mm fails L/150", () => {
+  it("cantilever ISMB 300 (IS 808:2021): Md = Zp·fy/γm0 = 154.8, deflection 26.7 mm just fails L/150", () => {
     const r = designSteelBeam({ span: 4, support: "cantilever", factoredUDL: 5, factoredPointLoad: 15, serviceUDL: 5, servicePointLoad: 15, section: "ISMB 300" });
     close(r.Mu, 100); close(r.Vu, 35);
     const c = r.candidates[0];
-    close(c.momentCapacity, 148.1, 0.01); close(c.deflection!, 27.9, 0.02); expect(c.deflectionOk).toBe(false); expect(c.ok).toBe(false);
+    close(c.momentCapacity, (681e3 * 250) / 1.1 / 1e6, 0.001); close(c.deflection!, 26.7, 0.005); expect(c.deflectionOk).toBe(false); expect(c.ok).toBe(false);
   });
   it("selects a section for 6 m beam 30 kN/m factored", () => {
     const r = designSteelBeam({ span: 6, factoredUDL: 30, serviceUDL: 20 });

@@ -20,18 +20,21 @@ const FALLBACK_COLOR = { text: "text-muted", dot: "bg-muted", active: "border-bo
 /** "design_rc_beam" → "Design RC beam" */
 const toolLabel = (name: string) => name.replace(/_/g, " ").replace(/\b(rc|boq|sbc|dxf)\b/g, (m) => m.toUpperCase()).replace(/^./, (c) => c.toUpperCase());
 
+/** Starting values for each calculator: typical Bangladeshi work (BNBC 2020, f'c 25 MPa, 500 MPa rebar) unless noted. */
 const PRESETS: Record<string, Record<string, unknown>> = {
   analyze_beam: { span: 6, support: "simply_supported", loads: [{ type: "udl", magnitude: 20 }], E: 200000, section: { b: 300, h: 500 } },
-  design_rc_beam: { code: "IS456", b: 300, D: 500, cover: 25, fck: 25, fy: 500, Mu: 150, Vu: 120, stirrupDia: 8, mainBarDia: 16 },
-  design_rc_column: { code: "IS456", b: 300, D: 450, fck: 25, fy: 500, Pu: 1800, unsupportedLength: 3000 },
-  design_one_way_slab: { code: "IS456", span: 3.5, liveLoad: 3, floorFinish: 1, fck: 25, fy: 500, cover: 20, support: "simply_supported" },
-  design_isolated_footing: { code: "IS456", columnB: 400, columnD: 400, serviceLoad: 900, safeBearingCapacity: 180, fck: 25, fy: 500, cover: 50 },
-  design_steel_beam: { code: "IS800", span: 6, factoredUDL: 30, serviceUDL: 20 },
+  design_rc_beam: { code: "BNBC2020", b: 250, D: 450, fck: 25, fy: 500, Mu: 120, Vu: 90, mainBarDia: 16, span: 5, support: "one_end_continuous" },
+  design_rc_column: { code: "BNBC2020", b: 300, D: 400, fck: 25, fy: 500, Pu: 1200, Mux: 60, Muy: 25, unsupportedLength: 3000, curvature: "double", endMomentRatio: 0.5 },
+  design_one_way_slab: { code: "BNBC2020", span: 3.5, liveLoad: 2, floorFinish: 1.2, fck: 25, fy: 500, cover: 20, support: "one_end_continuous" },
+  design_isolated_footing: { code: "BNBC2020", columnB: 300, columnD: 400, deadLoad: 600, liveLoad: 250, safeBearingCapacity: 150, fck: 25, fy: 500 },
+  design_steel_beam: { code: "IS800", span: 6, factoredUDL: 30, serviceUDL: 20, unbracedLength: 3 },
   bearing_capacity: { cohesion: 10, frictionAngle: 30, unitWeight: 18, depth: 1.5, width: 2, shape: "square", factorOfSafety: 3 },
+  settlement: { mode: "clay", footingWidth: 2, netPressure: 150, layers: [{ thickness: 3, e0: 0.9, Cc: 0.25, sigma0: 60, midDepthBelowBase: 1.5 }] },
+  earth_pressure: { frictionAngle: 30, height: 4, unitWeight: 18, surcharge: 10 },
   concrete_materials: { volume: 100, volumeUnit: "cft", ratio: "1:2:4", wastagePercent: 3 },
   rebar_schedule: { items: [{ label: "Bottom bars", diameter: 16, length: 6.3, count: 4 }, { label: "Stirrups", diameter: 8, length: 1.5, count: 40 }], wastagePercent: 3 },
-  convert_units: { value: 1, from: "kN/m2", to: "psf" },
-  calculate: { expression: "0.36*25*300*0.46*450*(450-0.42*0.46*450)/1e6" },
+  convert_units: { value: 5, from: "katha", to: "sqft" },
+  calculate: { expression: "0.85*25*250*0.8*150/1e3" },
   search_code_clauses: { query: "minimum cover", limit: 5 },
 };
 

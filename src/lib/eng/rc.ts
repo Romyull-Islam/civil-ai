@@ -1,73 +1,86 @@
 /**
- * Reinforced concrete design helpers.
- * Codes supported: IS 456:2000 (limit state) and ACI 318-19 (strength design), SI units.
- * Inputs: dimensions mm, strengths MPa, forces kN, moments kN·m.
+ * Reinforced concrete members: beams (flexure + shear), one-way slabs and isolated square footings.
+ * Codes: BNBC 2020 (Part 6 Ch. 6, following ACI 318M-11), ACI 318-19 and IS 456:2000. Columns are in column.ts.
+ * Units: mm, MPa, kN, kN·m. Clause references are given next to each rule so the calculations can be reviewed.
  *
- * These are preliminary-design calculators. Final designs must be checked by a licensed engineer.
+ * These are design calculators for a qualified engineer: results must be checked and signed by a licensed engineer.
  */
+import {
+  type DesignCode, CODES, DEFAULT_CODE, normalizeCode, ES, beta1, strainLimits, fytMax, slabMinSteelRatio, lambdaS,
+  isSteelStress, tauC_IS, tauCmax_IS, slabShearK_IS, tauBd_IS,
+} from "./rcCode";
 
-export type DesignCode = "IS456" | "ACI318";
+export type { DesignCode } from "./rcCode";
+export { tauC_IS } from "./rcCode";
 
-export const BAR_SIZES_MM = [8, 10, 12, 16, 20, 25, 32] as const;
+export const BAR_SIZES_MM = [8, 10, 12, 16, 20, 22, 25, 28, 32] as const;
 export const barArea = (d: number) => (Math.PI * d * d) / 4;
 
-export interface BarChoice {
-  diameter: number;
-  count: number;
-  areaProvided: number;
-  label: string;
-}
+export interface Check { name: string; ok: boolean; detail: string }
+export interface BarChoice { diameter: number; count: number; areaProvided: number; label: string }
 
-/** Choose a practical bar arrangement giving at least As required in a width b (mm). */
+/** Practical bar arrangements giving at least AsReq in width b (clear spacing ≥ max(db, 25 mm), ACI 25.2.1 / IS 26.3.2). */
 export function chooseBars(AsReq: number, b: number, cover = 25, stirrup = 8, minBars = 2, preferred?: number[]): BarChoice[] {
-  const sizes = preferred ?? [12, 16, 20, 25, 32];
+  const sizes = preferred ?? [12, 16, 20, 22, 25, 28, 32];
   const options: BarChoice[] = [];
   for (const d of sizes) {
     const a = barArea(d);
     const n = Math.max(minBars, Math.ceil(AsReq / a));
-    // clear spacing check: (b - 2cover - 2stirrup - n·d)/(n-1) >= max(d, 25)
     const clear = (b - 2 * cover - 2 * stirrup - n * d) / Math.max(1, n - 1);
     if (n > 1 && clear < Math.max(d, 25)) continue;
     if (n > 8) continue;
     options.push({ diameter: d, count: n, areaProvided: n * a, label: `${n} × Ø${d} mm (${(n * a).toFixed(0)} mm²)` });
   }
-  // Practical preference: 2–4 bars of a sensible size first (fewer, larger bars are easier to place), then by least steel.
   const rank = (o: BarChoice) => (o.count >= 2 && o.count <= 4 ? 0 : o.count <= 6 ? 1 : 2);
   return options.sort((p, q) => rank(p) - rank(q) || p.areaProvided - q.areaProvided);
 }
 
-// ---------------- IS 456 ----------------
-
+/** IS 456 cl. 38.1 note: xu,max/d. */
 export function xuMaxRatio(fy: number): number {
   if (fy <= 250) return 0.53;
   if (fy <= 415) return 0.48;
   return 0.46;
 }
 
-/** Design shear strength of concrete τc (MPa) per IS 456 Table 19 (closed form from SP:24). */
-export function tauC_IS(fck: number, pt: number): number {
-  const p = Math.max(0.15, Math.min(3, pt));
-  const beta = Math.max(1, (0.8 * fck) / (6.89 * p));
-  return (0.85 * Math.sqrt(0.8 * fck) * (Math.sqrt(1 + 5 * beta) - 1)) / (6 * beta);
+/** √f'c used in shear/development, limited to 8.3 MPa (BNBC 6.4.1.2, ACI 22.5.3.1). */
+const sqrtFc = (fc: number) => Math.min(Math.sqrt(fc), 8.3);
+
+function checkMaterials(code: DesignCode, fc: number, fy: number) {
+  if (!(fc > 0 && fy > 0)) throw new Error("Concrete and steel strengths must be positive");
+  if (CODES[code].family === "ACI" && fy > 550) throw new Error("fy above 550 MPa is not permitted in design (BNBC 6.2.4, ACI Table 20.2.2.4a)");
+  if (CODES[code].family === "ACI" && fc < 17) throw new Error("f'c below 17 MPa is not permitted for structural concrete (BNBC 6.1.6, ACI 19.2.1)");
 }
 
-export function tauCmax_IS(fck: number): number {
-  const table: [number, number][] = [[15, 2.5], [20, 2.8], [25, 3.1], [30, 3.5], [35, 3.7], [40, 4.0]];
-  for (const [f, t] of table) if (fck <= f) return t;
-  return 4.0;
+/** IS 456 Fig. 4 modification factor for tension steel (fit of the chart used in SP-24): 1/(0.225 + 0.00322fs − 0.625·log10(1/pt)) ≤ 2. */
+export function isTensionModFactor(fs: number, ptPercent: number): number {
+  const pt = Math.max(0.1, ptPercent);
+  return Math.min(2, Math.max(0.5, 1 / (0.225 + 0.00322 * fs - 0.625 * Math.log10(1 / pt))));
 }
+
+/** Minimum thickness (ACI Table 7.3.1.1 slabs / 9.3.1.1 beams; BNBC Table 6.6.1), with the fy correction 0.4 + fy/700. */
+export function aciMinThickness(member: "slab" | "beam", support: SupportType, spanMm: number, fy: number): number {
+  const div = member === "slab" ? { simply_supported: 20, one_end_continuous: 24, both_ends_continuous: 28, cantilever: 10 } : { simply_supported: 16, one_end_continuous: 18.5, both_ends_continuous: 21, cantilever: 8 };
+  return (spanMm / div[support]) * (0.4 + fy / 700);
+}
+export type SupportType = "simply_supported" | "one_end_continuous" | "both_ends_continuous" | "cantilever";
+export const normalizeSupport = (s: string | undefined): SupportType => (s === "continuous" ? "both_ends_continuous" : s === "one_end_continuous" || s === "both_ends_continuous" || s === "cantilever" ? s : "simply_supported");
+
+// ============================== Beams ==============================
 
 export interface RcBeamInput {
-  code?: DesignCode;
+  code?: DesignCode | string;
   b: number; // mm
   D: number; // overall depth mm
-  cover?: number; // clear cover mm (default 25)
-  fck: number; // MPa (f'c for ACI)
-  fy: number; // MPa
+  cover?: number; // clear cover to stirrups mm (default 25 IS / 40 ACI-BNBC)
+  fck: number; // fck (IS) or f'c (ACI/BNBC), MPa
+  fy: number; // longitudinal steel, MPa
+  fyStirrup?: number; // stirrup steel, MPa (default = fy, capped by code)
   Mu: number; // factored moment kN·m
   Vu?: number; // factored shear kN
   stirrupDia?: number;
-  mainBarDia?: number; // assumed for effective depth (default 16)
+  mainBarDia?: number; // for effective depth (default 16)
+  span?: number; // m, optional: minimum depth / deflection check
+  support?: SupportType | "continuous";
 }
 
 export interface RcBeamResult {
@@ -82,402 +95,394 @@ export interface RcBeamResult {
   ptProvidedPercent: number;
   tensionBars: BarChoice[];
   compressionBars?: BarChoice[];
-  shear?: {
-    tauV: number;
-    tauC: number;
-    tauCmax: number;
-    Vus: number;
-    stirrupSpacing: number;
-    stirrupLabel: string;
-    ok: boolean;
-  };
-  checks: { name: string; ok: boolean; detail: string }[];
+  shear?: { tauV: number; tauC: number; tauCmax: number; Vus: number; stirrupSpacing: number; stirrupLabel: string; ok: boolean };
+  checks: Check[];
   steps: string[];
 }
 
 export function designRcBeam(inp: RcBeamInput): RcBeamResult {
-  const code = inp.code ?? "IS456";
-  const cover = inp.cover ?? 25;
-  const sd = inp.stirrupDia ?? 8;
+  const code = normalizeCode(inp.code ?? DEFAULT_CODE);
+  const aci = CODES[code].family === "ACI";
+  checkMaterials(code, inp.fck, inp.fy);
+  const cover = inp.cover ?? (aci ? 40 : 25);
+  const sd = inp.stirrupDia ?? (aci ? 10 : 8);
   const db = inp.mainBarDia ?? 16;
-  const { b, D, fck, fy } = inp;
-  if (b <= 0 || D <= 0 || fck <= 0 || fy <= 0) throw new Error("b, D, fck, fy must be positive");
+  const { b, D, fck: fc, fy } = inp;
+  if (b <= 0 || D <= 0) throw new Error("b and D must be positive");
   const d = D - cover - sd - db / 2;
-  const Mu = inp.Mu * 1e6; // N·mm
-  const steps: string[] = [];
-  const checks: RcBeamResult["checks"] = [];
-  steps.push(`Effective depth d = D − cover − stirrup − bar/2 = ${D} − ${cover} − ${sd} − ${db / 2} = ${d.toFixed(1)} mm`);
+  const dPrime = cover + sd + db / 2;
+  const Mu = inp.Mu * 1e6;
+  const steps: string[] = [`${CODES[code].label}. Effective depth d = D − cover − stirrup − bar/2 = ${D} − ${cover} − ${sd} − ${db / 2} = ${d.toFixed(1)} mm`];
+  const checks: Check[] = [];
+  let AstRequired = 0, AscRequired = 0, MuLim: number | undefined, singly = true, AstMin: number, AstMax: number;
 
-  let AstRequired = 0;
-  let AscRequired = 0;
-  let MuLim: number | undefined;
-  let singly = true;
-  let AstMin: number;
-  let AstMax: number;
-
-  if (code === "IS456") {
+  if (!aci) {
     const k = xuMaxRatio(fy);
-    MuLim = 0.36 * fck * b * (k * d) * (d - 0.42 * k * d); // N·mm
-    steps.push(`xu,max/d = ${k} (Fe${fy}); Mu,lim = 0.36·fck·b·xu,max·(d − 0.42·xu,max) = ${(MuLim / 1e6).toFixed(2)} kN·m`);
-    AstMin = (0.85 * b * d) / fy;
-    AstMax = 0.04 * b * D;
+    const xuMax = k * d;
+    MuLim = 0.36 * fc * b * xuMax * (d - 0.42 * xuMax); // cl. 38.1 / Annex G-1.1
+    steps.push(`xu,max/d = ${k} (Fe${fy}); Mu,lim = 0.36·fck·b·xu,max·(d − 0.42·xu,max) = ${(MuLim / 1e6).toFixed(2)} kN·m (IS 456 G-1.1)`);
+    AstMin = (0.85 * b * d) / fy; // cl. 26.5.1.1(a)
+    AstMax = 0.04 * b * D; // cl. 26.5.1.1(b)
     if (Mu <= MuLim) {
-      // Mu = 0.87 fy Ast d (1 - fy Ast /(fck b d))  -> quadratic in Ast
-      const A = (0.87 * fy * fy) / (fck * b);
-      const B = -0.87 * fy * d;
-      const C = Mu;
-      const disc = B * B - 4 * A * C;
-      AstRequired = disc >= 0 ? (-B - Math.sqrt(disc)) / (2 * A) : Number.NaN;
-      steps.push(`Singly reinforced. Solve Mu = 0.87·fy·Ast·d·(1 − fy·Ast/(fck·b·d)) → Ast = ${AstRequired.toFixed(0)} mm²`);
+      const A = (0.87 * fy * fy) / (fc * b), B = -0.87 * fy * d;
+      AstRequired = (-B - Math.sqrt(B * B - 4 * A * Mu)) / (2 * A);
+      steps.push(`Singly reinforced: Mu = 0.87·fy·Ast·d·(1 − fy·Ast/(fck·b·d)) → Ast = ${AstRequired.toFixed(0)} mm² (IS 456 G-1.1(b))`);
     } else {
       singly = false;
-      const Ast1 = MuLim / (0.87 * fy * (d - 0.42 * k * d));
-      const dPrime = cover + sd + db / 2;
-      const Mu2 = Mu - MuLim;
-      // stress in compression steel: approx 0.87 fy for Fe415/500 if d'/d small (use fsc table simplification)
-      const fsc = fy <= 250 ? 0.87 * fy : Math.min(0.87 * fy, fy * (fy <= 415 ? 0.85 : 0.83));
-      AscRequired = Mu2 / ((fsc - 0.447 * fck) * (d - dPrime));
-      const Ast2 = (AscRequired * (fsc - 0.447 * fck)) / (0.87 * fy);
+      const Ast1 = MuLim / (0.87 * fy * (d - 0.42 * xuMax));
+      const esc = (0.0035 * (xuMax - dPrime)) / xuMax; // strain at the compression steel
+      const fsc = isSteelStress(fy, esc); // SP-16 Table A / IS 456 Fig. 23
+      const fcc = 0.446 * fc;
+      AscRequired = (Mu - MuLim) / ((fsc - fcc) * (d - dPrime));
+      const Ast2 = (AscRequired * (fsc - fcc)) / (0.87 * fy);
       AstRequired = Ast1 + Ast2;
-      steps.push(`Mu > Mu,lim → doubly reinforced. Ast1 = ${Ast1.toFixed(0)} mm², Mu2 = ${(Mu2 / 1e6).toFixed(2)} kN·m, Asc = ${AscRequired.toFixed(0)} mm² (d' = ${dPrime} mm, fsc ≈ ${fsc.toFixed(0)} MPa), Ast2 = ${Ast2.toFixed(0)} mm²`);
+      steps.push(`Mu > Mu,lim → doubly reinforced (IS 456 G-1.2). εsc = 0.0035·(xu,max − d')/xu,max = ${esc.toFixed(5)} → fsc = ${fsc.toFixed(0)} MPa (SP-16 Table A); Asc = (Mu − Mu,lim)/((fsc − 0.446fck)(d − d')) = ${AscRequired.toFixed(0)} mm²; Ast = ${Ast1.toFixed(0)} + ${Ast2.toFixed(0)} = ${AstRequired.toFixed(0)} mm²`);
     }
   } else {
-    // ACI 318-19 strength design, phi = 0.9 (tension-controlled assumed then checked)
     const phi = 0.9;
-    const beta1 = fck <= 28 ? 0.85 : Math.max(0.65, 0.85 - (0.05 * (fck - 28)) / 7);
-    AstMin = Math.max((0.25 * Math.sqrt(fck)) / fy, 1.4 / fy) * b * d;
-    // Ast max for tension controlled: εt = 0.005 -> c/d = 0.375
-    const cMax = 0.375 * d;
-    AstMax = (0.85 * fck * b * beta1 * cMax) / fy;
-    // Mu/phi = As fy (d - a/2), a = As fy / (0.85 fck b)
-    const A = (fy * fy) / (2 * 0.85 * fck * b);
-    const B = -fy * d;
-    const C = Mu / phi;
+    const b1 = beta1(fc);
+    const et = strainLimits(code, fy).tension;
+    AstMin = Math.max((0.25 * Math.sqrt(fc)) / fy, 1.4 / fy) * b * d; // ACI 9.6.1.2, BNBC 6.3.5.1
+    const cTc = (0.003 * d) / (0.003 + et); // deepest neutral axis that is still tension-controlled
+    AstMax = (0.85 * fc * b * b1 * cTc) / fy;
+    const A = (fy * fy) / (2 * 0.85 * fc * b), B = -fy * d, C = Mu / phi;
     const disc = B * B - 4 * A * C;
-    if (disc < 0) {
-      singly = false;
-      AstRequired = AstMax;
-      const MnMax = AstMax * fy * (d - (AstMax * fy) / (2 * 0.85 * fck * b));
-      const Mu2 = Mu / phi - MnMax;
-      const dPrime = cover + sd + db / 2;
-      AscRequired = Mu2 / (fy * (d - dPrime));
-      AstRequired = AstMax + AscRequired;
-      steps.push(`Section cannot remain tension-controlled singly reinforced. Add compression steel Asc = ${AscRequired.toFixed(0)} mm²`);
+    const singlyAs = disc >= 0 ? (-B - Math.sqrt(disc)) / (2 * A) : Number.POSITIVE_INFINITY;
+    if (singlyAs <= AstMax) {
+      AstRequired = singlyAs;
+      const a = (AstRequired * fy) / (0.85 * fc * b), c = a / b1, eps = (0.003 * (d - c)) / c;
+      steps.push(`β1 = ${b1.toFixed(3)}. Mu/φ = As·fy·(d − a/2) with φ = 0.9 → As = ${AstRequired.toFixed(0)} mm², a = ${a.toFixed(1)} mm, c = ${c.toFixed(1)} mm, εt = ${eps.toFixed(4)} ≥ ${et.toFixed(4)} (tension-controlled)`);
     } else {
-      AstRequired = (-B - Math.sqrt(disc)) / (2 * A);
-      const a = (AstRequired * fy) / (0.85 * fck * b);
-      const c = a / beta1;
-      const et = (0.003 * (d - c)) / c;
-      steps.push(`β1 = ${beta1.toFixed(3)}; solve Mu/φ = As·fy·(d − a/2) → As = ${AstRequired.toFixed(0)} mm², a = ${a.toFixed(1)} mm, c = ${c.toFixed(1)} mm, εt = ${et.toFixed(4)} (${et >= 0.005 ? "tension-controlled, φ = 0.9" : "NOT tension-controlled; increase section"})`);
-      checks.push({ name: "Tension-controlled (εt ≥ 0.005)", ok: et >= 0.005, detail: `εt = ${et.toFixed(4)}` });
-      if (AstRequired > AstMax) singly = false;
+      // Doubly reinforced by strain compatibility at the tension-controlled limit c = cTc
+      singly = false;
+      const Cc = 0.85 * fc * b * b1 * cTc;
+      const Mn1 = Cc * (d - (b1 * cTc) / 2);
+      const Mn2 = Mu / phi - Mn1;
+      const esc = (0.003 * (cTc - dPrime)) / cTc;
+      const fsc = Math.min(fy, ES * esc);
+      if (fsc - 0.85 * fc <= 0) throw new Error("Compression steel is ineffective at this depth: increase the beam depth");
+      AscRequired = Mn2 / ((fsc - 0.85 * fc) * (d - dPrime));
+      AstRequired = (Cc + AscRequired * (fsc - 0.85 * fc)) / fy;
+      steps.push(`A tension-controlled singly reinforced section cannot carry Mu → compression steel at c = ${cTc.toFixed(1)} mm (εt = ${et.toFixed(4)}): εs' = ${esc.toFixed(4)}, fs' = ${fsc.toFixed(0)} MPa, As' = ${AscRequired.toFixed(0)} mm², As = ${AstRequired.toFixed(0)} mm²`);
+      AstMax = Number.POSITIVE_INFINITY; // the limit is met by design (c = cTc)
     }
   }
 
   const AstDesign = Math.max(AstRequired, AstMin);
-  checks.push({ name: "Ast ≥ Ast,min", ok: AstRequired >= AstMin, detail: `Ast,min = ${AstMin.toFixed(0)} mm² (${AstRequired < AstMin ? "governs; provide Ast,min" : "ok"})` });
-  checks.push({ name: "Ast ≤ Ast,max", ok: AstDesign <= AstMax, detail: `Ast,max = ${AstMax.toFixed(0)} mm²` });
+  checks.push({ name: "As ≥ As,min", ok: true, detail: `As,min = ${AstMin.toFixed(0)} mm²${AstRequired < AstMin ? " governs; minimum steel provided" : ""}` });
+  if (Number.isFinite(AstMax)) checks.push({ name: aci ? "Tension-controlled (As ≤ As,tc)" : "Ast ≤ 4% bD", ok: AstDesign <= AstMax, detail: `limit ${AstMax.toFixed(0)} mm²` });
 
   const tensionBars = chooseBars(AstDesign, b, cover, sd);
   const compressionBars = AscRequired > 0 ? chooseBars(AscRequired, b, cover, sd) : undefined;
+  if (!tensionBars.length) checks.push({ name: "Bars fit in one layer", ok: false, detail: "Steel does not fit in one layer: widen the beam or use two layers" });
   const provided = tensionBars[0]?.areaProvided ?? AstDesign;
   const pt = (100 * provided) / (b * d);
+
+  if (inp.span) {
+    const support = normalizeSupport(inp.support);
+    const L = inp.span * 1000;
+    if (aci) {
+      const hMin = aciMinThickness("beam", support, L, fy);
+      checks.push({ name: "Depth ≥ minimum (deflection)", ok: D >= hMin, detail: `h = ${D} ≥ ${hMin.toFixed(0)} mm (${code === "BNBC2020" ? "BNBC Table 6.6.1" : "ACI Table 9.3.1.1"}); otherwise compute deflections` });
+    } else {
+      const basic = support === "cantilever" ? 7 : support === "simply_supported" ? 20 : 26;
+      const fs = (0.58 * fy * AstDesign) / provided;
+      const mf = isTensionModFactor(fs, pt);
+      const allowed = basic * mf * (L > 10000 && support !== "cantilever" ? 10000 / L : 1);
+      checks.push({ name: "Span/d (IS 456 cl. 23.2.1)", ok: L / d <= allowed, detail: `L/d = ${(L / d).toFixed(1)} ≤ ${basic} × ${mf.toFixed(2)} = ${allowed.toFixed(1)}` });
+    }
+  }
 
   let shear: RcBeamResult["shear"];
   if (inp.Vu !== undefined) {
     const Vu = inp.Vu * 1e3;
-    const tauV = Vu / (b * d);
     const legs = 2;
     const Asv = legs * barArea(sd);
-    if (code === "IS456") {
-      const tauC = tauC_IS(fck, pt);
-      const tauCmax = tauCmax_IS(fck);
+    const fyt = Math.min(inp.fyStirrup ?? fy, fytMax(code)); // IS 456 cl. 40.4 / ACI 20.2.2.4 / BNBC 6.4.3.2
+    const tauV = Vu / (b * d);
+    if (!aci) {
+      const tauC = tauC_IS(fc, pt);
+      const tauCmax = tauCmax_IS(fc);
       const Vus = Math.max(0, Vu - tauC * b * d);
-      let sv = Vus > 0 ? (0.87 * fy * Asv * d) / Vus : Infinity;
-      const svMin = (0.87 * fy * Asv) / (0.4 * b); // minimum shear reinforcement
-      sv = Math.min(sv, svMin, 0.75 * d, 300);
-      sv = Math.floor(sv / 10) * 10;
+      let sv = Vus > 0 ? (0.87 * fyt * Asv * d) / Vus : Number.POSITIVE_INFINITY; // cl. 40.4(a)
+      const svMin = (0.87 * fyt * Asv) / (0.4 * b); // cl. 26.5.1.6
+      sv = Math.floor(Math.min(sv, svMin, 0.75 * d, 300) / 10) * 10; // cl. 26.5.1.5
       shear = { tauV, tauC, tauCmax, Vus: Vus / 1e3, stirrupSpacing: sv, stirrupLabel: `${legs}-legged Ø${sd} @ ${sv} mm c/c`, ok: tauV <= tauCmax };
-      steps.push(`Shear: τv = Vu/(b·d) = ${tauV.toFixed(3)} MPa; τc = ${tauC.toFixed(3)} MPa (pt = ${pt.toFixed(2)}%); τc,max = ${tauCmax} MPa; Vus = ${(Vus / 1e3).toFixed(1)} kN → ${shear.stirrupLabel}`);
-      checks.push({ name: "τv ≤ τc,max", ok: tauV <= tauCmax, detail: `${tauV.toFixed(3)} ≤ ${tauCmax}` });
+      steps.push(`Shear (IS 456 cl. 40): τv = ${tauV.toFixed(3)} MPa, τc = ${tauC.toFixed(3)} MPa (Table 19, pt = ${pt.toFixed(2)}%), τc,max = ${tauCmax} MPa; Vus = ${(Vus / 1e3).toFixed(1)} kN with fy,stirrup = ${fyt} MPa → ${shear.stirrupLabel}`);
+      checks.push({ name: "τv ≤ τc,max", ok: tauV <= tauCmax, detail: `${tauV.toFixed(3)} ≤ ${tauCmax} MPa (IS 456 Table 20)` });
     } else {
       const phiV = 0.75;
-      const Vc = 0.17 * Math.sqrt(fck) * b * d;
+      const rt = sqrtFc(fc);
+      // Beams are always given at least Av,min here, so Vc = 0.17λ√f'c·bw·d (BNBC Eq. 6.6.49; ACI 318-19 Table 22.5.5.1(a))
+      const Vc = 0.17 * rt * b * d;
       const Vs = Math.max(0, Vu / phiV - Vc);
-      const VsMax = 0.66 * Math.sqrt(fck) * b * d;
-      let s = Vs > 0 ? (Asv * fy * d) / Vs : Infinity;
-      const sMax = Vs <= 0.33 * Math.sqrt(fck) * b * d ? Math.min(d / 2, 600) : Math.min(d / 4, 300);
-      const sMin = Math.min((Asv * fy) / (0.062 * Math.sqrt(fck) * b), (Asv * fy) / (0.35 * b));
-      s = Math.min(s, sMax, sMin);
-      s = Math.floor(s / 10) * 10;
-      shear = { tauV: Vu / (b * d), tauC: Vc / (b * d), tauCmax: (Vc + VsMax) / (b * d), Vus: Vs / 1e3, stirrupSpacing: s, stirrupLabel: `${legs}-leg Ø${sd} @ ${s} mm`, ok: Vs <= VsMax };
-      steps.push(`Shear (ACI): Vc = 0.17√f'c·b·d = ${(Vc / 1e3).toFixed(1)} kN; Vs req = Vu/φ − Vc = ${(Vs / 1e3).toFixed(1)} kN → ${shear.stirrupLabel}`);
-      checks.push({ name: "Vs ≤ 0.66√f'c·b·d", ok: Vs <= VsMax, detail: `${(Vs / 1e3).toFixed(1)} ≤ ${(VsMax / 1e3).toFixed(1)} kN` });
+      const VsMax = 0.66 * rt * b * d;
+      let s = Vs > 0 ? (Asv * fyt * d) / Vs : Number.POSITIVE_INFINITY;
+      const sMax = Vs <= 0.33 * rt * b * d ? Math.min(d / 2, 600) : Math.min(d / 4, 300);
+      const sAvMin = (Asv * fyt) / Math.max(0.062 * Math.sqrt(fc) * b, 0.35 * b);
+      s = Math.floor(Math.min(s, sMax, sAvMin) / 10) * 10;
+      shear = { tauV, tauC: Vc / (b * d), tauCmax: (Vc + VsMax) / (b * d), Vus: Vs / 1e3, stirrupSpacing: s, stirrupLabel: `${legs}-leg Ø${sd} @ ${s} mm`, ok: Vs <= VsMax };
+      steps.push(`Shear: Vc = 0.17√f'c·b·d = ${(Vc / 1e3).toFixed(1)} kN; Vs = Vu/0.75 − Vc = ${(Vs / 1e3).toFixed(1)} kN; fyt = ${fyt} MPa → ${shear.stirrupLabel} (s ≤ ${sMax.toFixed(0)} mm, Av,min spacing ${sAvMin.toFixed(0)} mm)`);
+      checks.push({ name: "Vs ≤ 0.66√f'c·b·d", ok: Vs <= VsMax, detail: `${(Vs / 1e3).toFixed(1)} ≤ ${(VsMax / 1e3).toFixed(1)} kN (section too small otherwise)` });
     }
   }
 
-  return {
-    code,
-    d,
-    MuLim: MuLim !== undefined ? MuLim / 1e6 : undefined,
-    singlyReinforced: singly,
-    AstRequired: AstDesign,
-    AstMin,
-    AstMax,
-    AscRequired,
-    ptProvidedPercent: pt,
-    tensionBars,
-    compressionBars,
-    shear,
-    checks,
-    steps,
-  };
+  return { code, d, MuLim: MuLim !== undefined ? MuLim / 1e6 : undefined, singlyReinforced: singly, AstRequired: AstDesign, AstMin, AstMax, AscRequired, ptProvidedPercent: pt, tensionBars, compressionBars, shear, checks, steps };
 }
 
-// ---------------- Columns ----------------
-
-export interface RcColumnInput {
-  code?: DesignCode;
-  b: number;
-  D: number;
-  fck: number;
-  fy: number;
-  Pu: number; // factored axial load kN
-  unsupportedLength?: number; // mm, for slenderness check
-  /** if provided, checks capacity for given steel percentage instead of designing */
-  steelPercent?: number;
-}
-export interface RcColumnResult {
-  code: DesignCode;
-  Ag: number;
-  AscRequired: number;
-  steelPercent: number;
-  capacity: number; // kN with Asc provided
-  bars: BarChoice[];
-  ties: string;
-  slenderness: { ratio: number; short: boolean };
-  checks: { name: string; ok: boolean; detail: string }[];
-  steps: string[];
-}
-
-export function designRcColumn(inp: RcColumnInput): RcColumnResult {
-  const code = inp.code ?? "IS456";
-  const { b, D, fck, fy } = inp;
-  const Pu = inp.Pu * 1e3;
-  const Ag = b * D;
-  const steps: string[] = [];
-  const checks: RcColumnResult["checks"] = [];
-  const lu = inp.unsupportedLength ?? 3000;
-  const ratio = lu / Math.min(b, D);
-  const short = ratio <= 12;
-  steps.push(`Slenderness lu/min(b,D) = ${ratio.toFixed(1)} → ${short ? "short column" : "slender column (moment magnification required; not covered here)"}`);
-  let Asc: number;
-  let capacityFn: (A: number) => number;
-  if (code === "IS456") {
-    // Pu = 0.4 fck Ac + 0.67 fy Asc (IS 456 cl. 39.3, min eccentricity assumed satisfied)
-    capacityFn = (A) => 0.4 * fck * (Ag - A) + 0.67 * fy * A;
-    Asc = (Pu - 0.4 * fck * Ag) / (0.67 * fy - 0.4 * fck);
-    steps.push(`IS 456 cl.39.3: Pu = 0.4·fck·Ac + 0.67·fy·Asc → Asc = ${Asc.toFixed(0)} mm²`);
-  } else {
-    // ACI 318-19 tied column: φPn,max = 0.65 × 0.80 × [0.85 f'c (Ag − Ast) + fy Ast]
-    capacityFn = (A) => 0.65 * 0.8 * (0.85 * fck * (Ag - A) + fy * A);
-    Asc = (Pu / (0.65 * 0.8) - 0.85 * fck * Ag) / (fy - 0.85 * fck);
-    steps.push(`ACI 318-19 22.4.2: φPn,max = 0.52·[0.85·f'c·(Ag − Ast) + fy·Ast] → Ast = ${Asc.toFixed(0)} mm²`);
-  }
-  const minPct = code === "IS456" ? 0.8 : 1.0;
-  const maxPct = code === "IS456" ? 4.0 : 8.0;
-  const AscMin = (minPct / 100) * Ag;
-  const AscDesign = Math.max(Asc, AscMin);
-  if (inp.steelPercent !== undefined) {
-    const A = (inp.steelPercent / 100) * Ag;
-    const cap = capacityFn(A) / 1e3;
-    checks.push({ name: "Capacity ≥ Pu", ok: cap >= inp.Pu, detail: `Capacity with ${inp.steelPercent}% steel = ${cap.toFixed(0)} kN vs Pu = ${inp.Pu} kN` });
-  }
-  const pct = (100 * AscDesign) / Ag;
-  checks.push({ name: `Steel ≥ ${minPct}%`, ok: AscDesign >= AscMin, detail: `${pct.toFixed(2)}% provided (min ${minPct}%)` });
-  checks.push({ name: `Steel ≤ ${maxPct}%`, ok: pct <= maxPct, detail: pct > maxPct ? "Increase section size" : "ok" });
-  checks.push({ name: "Short column", ok: short, detail: `lu/b = ${ratio.toFixed(1)}` });
-  const bars = chooseBars(AscDesign, Math.min(b, D), 40, 8, 4, [12, 16, 20, 25, 32]).filter((o) => o.count % 2 === 0 || o.count >= 4);
-  const mainD = bars[0]?.diameter ?? 16;
-  const tieD = Math.max(6, Math.ceil(mainD / 4));
-  const tieSpacing = Math.min(Math.min(b, D), 16 * mainD, 300);
-  return {
-    code,
-    Ag,
-    AscRequired: AscDesign,
-    steelPercent: pct,
-    capacity: capacityFn(bars[0]?.areaProvided ?? AscDesign) / 1e3,
-    bars,
-    ties: `Ø${tieD} lateral ties @ ${Math.floor(tieSpacing / 10) * 10} mm c/c`,
-    slenderness: { ratio, short },
-    checks,
-    steps,
-  };
-}
-
-// ---------------- One-way slab ----------------
+// ============================== One-way slabs ==============================
 
 export interface SlabInput {
-  code?: DesignCode;
-  span: number; // m, effective span (short direction for one-way)
+  code?: DesignCode | string;
+  span: number; // m, effective span
   liveLoad: number; // kN/m²
   floorFinish?: number; // kN/m² (default 1.0)
+  partitionLoad?: number; // kN/m² extra dead load (default 0)
   fck: number;
   fy: number;
-  cover?: number; // default 20
-  support?: "simply_supported" | "continuous" | "cantilever";
-  thickness?: number; // mm, optional override
+  cover?: number; // clear cover mm (default 20)
+  support?: SupportType | "continuous";
+  thickness?: number; // mm, optional
+  barDia?: number; // main bar mm (default 10)
+  brickAggregate?: boolean; // BNBC 8.1.11.2: 1.5× minimum steel for brick-aggregate concrete
 }
+
 export interface SlabResult {
+  code: DesignCode;
   thickness: number;
   d: number;
   selfWeight: number;
   totalLoad: number;
   factoredLoad: number;
-  Mu: number;
+  Mu: number; // governing (largest) moment kN·m/m
+  MuSpan: number;
+  MuSupport: number;
   Vu: number;
   AstRequired: number;
   AstMin: number;
   mainBars: string;
+  topBars: string | null;
   distributionBars: string;
-  deflectionCheck: { ok: boolean; detail: string };
-  shearCheck: { ok: boolean; detail: string };
+  deflectionCheck: Check;
+  shearCheck: Check;
+  checks: Check[];
   steps: string[];
 }
 
 export function designOneWaySlab(inp: SlabInput): SlabResult {
-  const code = inp.code ?? "IS456";
+  const code = normalizeCode(inp.code ?? DEFAULT_CODE);
+  const aci = CODES[code].family === "ACI";
+  checkMaterials(code, inp.fck, inp.fy);
+  const support = normalizeSupport(inp.support);
   const cover = inp.cover ?? 20;
-  const support = inp.support ?? "simply_supported";
-  const L = inp.span;
-  const steps: string[] = [];
-  const baseRatio = support === "cantilever" ? 7 : support === "continuous" ? 26 : 20;
-  const ratio = baseRatio * (inp.fy <= 250 ? 1.0 : inp.fy <= 415 ? 1.25 : 1.15); // approx modification factor for typical pt
-  const dReq = (L * 1000) / ratio;
-  const barD = 10;
-  let thickness = inp.thickness ?? Math.ceil((dReq + cover + barD / 2) / 10) * 10;
-  thickness = Math.max(thickness, 100);
-  const d = thickness - cover - barD / 2;
-  steps.push(`Span/depth ratio ${ratio.toFixed(1)} → d,req = ${dReq.toFixed(0)} mm → thickness D = ${thickness} mm, d = ${d.toFixed(0)} mm`);
-  const selfWeight = (thickness / 1000) * 25;
+  const barD = inp.barDia ?? 10;
+  const L = inp.span * 1000;
+  const fc = inp.fck, fy = inp.fy;
+  const steps: string[] = [`${CODES[code].label}; ${support.replace(/_/g, " ")} one-way slab, span ${inp.span} m`];
+  const unitWt = aci ? 23.6 : 25; // BNBC Table 6.2.1 reinforced concrete 23.6 kN/m³; IS 875-1: 25 kN/m³
   const ff = inp.floorFinish ?? 1.0;
-  const total = selfWeight + ff + inp.liveLoad;
-  const lf = code === "IS456" ? 1.5 : 1.0;
-  const factored = code === "IS456" ? lf * total : 1.2 * (selfWeight + ff) + 1.6 * inp.liveLoad;
-  steps.push(`Loads (per m width): self ${selfWeight.toFixed(2)} + finish ${ff} + live ${inp.liveLoad} = ${total.toFixed(2)} kN/m²; factored wu = ${factored.toFixed(2)} kN/m`);
-  const mCoef = support === "cantilever" ? 0.5 : support === "continuous" ? 1 / 10 : 1 / 8;
-  const Mu = mCoef * factored * L * L;
-  const Vu = (support === "cantilever" ? 1 : 0.5) * factored * L * (support === "continuous" ? 1.15 : 1);
-  steps.push(`Mu = ${support === "cantilever" ? "wL²/2" : support === "continuous" ? "wL²/10" : "wL²/8"} = ${Mu.toFixed(2)} kN·m/m; Vu = ${Vu.toFixed(2)} kN/m`);
-  const beam = designRcBeam({ code, b: 1000, D: thickness, cover, fck: inp.fck, fy: inp.fy, Mu, Vu, stirrupDia: 0, mainBarDia: barD });
-  const AstMin = code === "IS456" ? (inp.fy <= 250 ? 0.0015 : 0.0012) * 1000 * thickness : 0.0018 * 1000 * thickness;
-  const Ast = Math.max(beam.AstRequired, AstMin);
-  const spacingFor = (area: number, dia: number) => Math.min(Math.floor((1000 * barArea(dia)) / area / 10) * 10, 3 * thickness, 300);
-  const mainSp = spacingFor(Ast, barD);
-  const distSp = spacingFor(AstMin, 8);
-  const ptProv = (100 * ((1000 * barArea(barD)) / mainSp)) / (1000 * d);
-  const tauV = (Vu * 1e3) / (1000 * d);
-  const tauC = code === "IS456" ? tauC_IS(inp.fck, ptProv) * (thickness <= 150 ? 1.3 : thickness >= 300 ? 1.0 : 1.3 - (0.3 * (thickness - 150)) / 150) : (0.75 * 0.17 * Math.sqrt(inp.fck));
-  steps.push(`Ast = ${Ast.toFixed(0)} mm²/m → Ø${barD} @ ${mainSp} mm c/c; distribution Ø8 @ ${distSp} mm c/c`);
+  const extra = inp.partitionLoad ?? 0;
+  const minRatio = slabMinSteelRatio(code, fy) * (inp.brickAggregate && code === "BNBC2020" ? 1.5 : 1);
+
+  // moment and shear per metre width for a factored load, by code coefficients
+  const actions = (h: number) => {
+    const sw = (h / 1000) * unitWt;
+    const wd = sw + ff + extra, wl = inp.liveLoad;
+    if (!aci) {
+      const f = 1.5; // IS 456 Table 18
+      const [ds, ls, dsu, lsu, dv, lv] = {
+        simply_supported: [1 / 8, 1 / 8, 0, 0, 0.5, 0.5],
+        cantilever: [0, 0, 1 / 2, 1 / 2, 1, 1],
+        one_end_continuous: [1 / 12, 1 / 10, 1 / 10, 1 / 9, 0.6, 0.6], // IS Table 12 & 13: end span, support next to end support
+        both_ends_continuous: [1 / 16, 1 / 12, 1 / 12, 1 / 9, 0.5, 0.6], // interior span, interior support
+      }[support];
+      return { sw, wd, wl, wu: f * (wd + wl), Mspan: f * (ds * wd + ls * wl) * inp.span ** 2, Msup: f * (dsu * wd + lsu * wl) * inp.span ** 2, V: f * (dv * wd + lv * wl) * inp.span };
+    }
+    const wu = Math.max(1.4 * wd, 1.2 * wd + 1.6 * wl); // BNBC 2.7.3.1 / ACI 5.3.1
+    const [cs, csu, cv] = { simply_supported: [1 / 8, 0, 0.5], cantilever: [0, 1 / 2, 1], one_end_continuous: [1 / 11, 1 / 10, 1.15 / 2], both_ends_continuous: [1 / 16, 1 / 11, 0.5] }[support]; // ACI 6.5 approximate coefficients
+    return { sw, wd, wl, wu, Mspan: cs * wu * inp.span ** 2, Msup: csu * wu * inp.span ** 2, V: cv * wu * inp.span };
+  };
+
+  // thickness: ACI/BNBC minimum-thickness table, IS span/effective-depth with the steel modification factor
+  let h = inp.thickness ?? (aci ? Math.max(100, Math.ceil(aciMinThickness("slab", support, L, fy) / 10) * 10) : 100);
+  let a = actions(h), d = h - cover - barD / 2;
+  const steelFor = (M: number, dd: number, hh: number) => {
+    if (M <= 0) return 0;
+    const req = designRcBeam({ code, b: 1000, D: hh, cover, fck: fc, fy, Mu: M, stirrupDia: 0, mainBarDia: barD }).AstRequired;
+    return Math.max(req, minRatio * 1000 * hh);
+  };
+  const spacing = (As: number, dia: number, max: number) => Math.min(Math.floor((1000 * barArea(dia)) / As / 10) * 10, max);
+  let isMF = 1, isAllowed = 0;
+  for (let guard = 0; guard < 80; guard++) {
+    a = actions(h); d = h - cover - barD / 2;
+    if (aci || inp.thickness) break;
+    const M = support === "cantilever" ? a.Msup : a.Mspan; // steel that controls deflection
+    const As = steelFor(M, d, h);
+    const s = spacing(As, barD, Math.min(3 * d, 300));
+    const prov = (1000 * barArea(barD)) / s;
+    const basic = support === "cantilever" ? 7 : support === "simply_supported" ? 20 : 26; // cl. 23.2.1
+    isMF = isTensionModFactor((0.58 * fy * As) / prov, (100 * prov) / (1000 * d));
+    isAllowed = basic * isMF * (L > 10000 && support !== "cantilever" ? 10000 / L : 1);
+    if (L / d <= isAllowed) break;
+    h += 10;
+  }
+  const Ms = a.Mspan, Msu = a.Msup;
+  steps.push(`Thickness h = ${h} mm, d = ${d.toFixed(0)} mm. Loads: self ${a.sw.toFixed(2)} + finish ${ff}${extra ? ` + partitions ${extra}` : ""} + live ${inp.liveLoad} kN/m² → wu = ${a.wu.toFixed(2)} kN/m (${aci ? "max(1.4D, 1.2D + 1.6L)" : "1.5(D + L)"})`);
+  steps.push(`Moments per metre: span ${Ms.toFixed(2)}, support ${Msu.toFixed(2)} kN·m; shear ${a.V.toFixed(2)} kN (${aci ? "ACI 6.5 / BNBC approximate coefficients" : "IS 456 Tables 12–13"})`);
+
+  const maxMain = aci ? Math.min(3 * h, 450) : Math.min(3 * d, 300); // ACI 7.7.2.3 / IS 26.3.3(b)(1)
+  const maxDist = aci ? Math.min(5 * h, 450) : Math.min(5 * d, 450); // ACI 24.4.3.3 / IS 26.3.3(b)(2)
+  const AsSpan = Ms > 0 ? steelFor(Ms, d, h) : 0;
+  const AsSup = Msu > 0 ? steelFor(Msu, d, h) : 0;
+  const AstMin = minRatio * 1000 * h;
+  const bottomAs = Math.max(AsSpan, support === "cantilever" ? AstMin : 0);
+  const sBot = spacing(Math.max(bottomAs, AstMin), barD, maxMain);
+  const sTop = AsSup > 0 ? spacing(AsSup, barD, maxMain) : 0;
+  const distDia = 8;
+  const sDist = spacing(AstMin, distDia, maxDist);
+  steps.push(`Minimum steel ${(minRatio * 100).toFixed(3)}% of bh = ${AstMin.toFixed(0)} mm²/m${inp.brickAggregate && code === "BNBC2020" ? " (×1.5 for brick aggregate, BNBC 8.1.11.2)" : ""}`);
+  steps.push(`Bottom: As = ${Math.max(bottomAs, AstMin).toFixed(0)} mm²/m → Ø${barD} @ ${sBot} mm${AsSup > 0 ? `; top over supports: As = ${AsSup.toFixed(0)} mm²/m → Ø${barD} @ ${sTop} mm` : ""}; distribution Ø${distDia} @ ${sDist} mm`);
+
+  // deflection
+  let deflectionCheck: Check;
+  if (aci) {
+    const hMin = aciMinThickness("slab", support, L, fy);
+    deflectionCheck = { name: "Thickness ≥ minimum (deflection)", ok: h >= hMin - 0.5, detail: `h = ${h} ≥ ${hMin.toFixed(0)} mm (${code === "BNBC2020" ? "BNBC Table 6.6.1" : "ACI Table 7.3.1.1"})` };
+  } else {
+    const basic = support === "cantilever" ? 7 : support === "simply_supported" ? 20 : 26;
+    const provBot = (1000 * barArea(barD)) / sBot;
+    const AsDefl = support === "cantilever" ? Math.max(AsSup, AstMin) : Math.max(AsSpan, AstMin);
+    const provDefl = support === "cantilever" && sTop ? (1000 * barArea(barD)) / sTop : provBot;
+    isMF = isTensionModFactor((0.58 * fy * AsDefl) / Math.max(provDefl, 1), (100 * provDefl) / (1000 * d));
+    isAllowed = basic * isMF * (L > 10000 && support !== "cantilever" ? 10000 / L : 1);
+    deflectionCheck = { name: "Span/d (IS 456 cl. 23.2.1)", ok: L / d <= isAllowed + 1e-9, detail: `L/d = ${(L / d).toFixed(1)} ≤ ${basic} × MF ${isMF.toFixed(2)} = ${isAllowed.toFixed(1)}` };
+  }
+
+  // one-way shear (no shear reinforcement in slabs)
+  const Vu = a.V * 1e3;
+  const rho = Math.max(AsSpan, AsSup, AstMin) / (1000 * d);
+  let shearCheck: Check;
+  if (!aci) {
+    const tc = slabShearK_IS(h) * tauC_IS(fc, 100 * rho);
+    const tv = Vu / (1000 * d);
+    shearCheck = { name: "Shear τv ≤ k·τc", ok: tv <= tc, detail: `${tv.toFixed(3)} ≤ ${tc.toFixed(3)} MPa (IS 456 cl. 40.2.1.1)` };
+  } else {
+    const Vc = CODES[code].sizeEffectShear
+      ? Math.min(0.66 * lambdaS(d) * Math.cbrt(rho) * sqrtFc(fc), 0.42 * sqrtFc(fc)) * 1000 * d // ACI 318-19 Table 22.5.5.1(c)
+      : 0.17 * sqrtFc(fc) * 1000 * d; // BNBC Eq. 6.6.49
+    shearCheck = { name: "Shear Vu ≤ φVc", ok: Vu <= 0.75 * Vc, detail: `${(Vu / 1e3).toFixed(1)} ≤ ${((0.75 * Vc) / 1e3).toFixed(1)} kN/m${CODES[code].sizeEffectShear ? ` (λs = ${lambdaS(d).toFixed(3)}, ρw = ${(rho * 100).toFixed(2)}%)` : ""}` };
+  }
+  const checks = [deflectionCheck, shearCheck];
   return {
-    thickness,
-    d,
-    selfWeight,
-    totalLoad: total,
-    factoredLoad: factored,
-    Mu,
-    Vu,
-    AstRequired: Ast,
-    AstMin,
-    mainBars: `Ø${barD} @ ${mainSp} mm c/c (${((1000 * barArea(barD)) / mainSp).toFixed(0)} mm²/m)`,
-    distributionBars: `Ø8 @ ${distSp} mm c/c`,
-    deflectionCheck: { ok: d >= dReq, detail: `d = ${d.toFixed(0)} ≥ d,req = ${dReq.toFixed(0)} mm (span/depth)` },
-    shearCheck: { ok: tauV <= tauC, detail: `τv = ${tauV.toFixed(3)} MPa ≤ k·τc = ${tauC.toFixed(3)} MPa` },
-    steps,
+    code, thickness: h, d, selfWeight: a.sw, totalLoad: a.wd + a.wl, factoredLoad: a.wu,
+    Mu: Math.max(Ms, Msu), MuSpan: Ms, MuSupport: Msu, Vu: a.V,
+    AstRequired: Math.max(AsSpan, AsSup, AstMin), AstMin,
+    mainBars: `Ø${barD} @ ${sBot} mm c/c bottom (${((1000 * barArea(barD)) / sBot).toFixed(0)} mm²/m)`,
+    topBars: AsSup > 0 ? `Ø${barD} @ ${sTop} mm c/c top over supports (${((1000 * barArea(barD)) / sTop).toFixed(0)} mm²/m)` : null,
+    distributionBars: `Ø${distDia} @ ${sDist} mm c/c`,
+    deflectionCheck, shearCheck, checks, steps,
   };
 }
 
-// ---------------- Isolated footing ----------------
+// ============================== Isolated footings ==============================
 
 export interface FootingInput {
-  code?: DesignCode;
+  code?: DesignCode | string;
   columnB: number; // mm
   columnD: number; // mm
-  serviceLoad: number; // kN (unfactored)
-  safeBearingCapacity: number; // kN/m²
+  serviceLoad?: number; // kN total unfactored (use deadLoad + liveLoad when known)
+  deadLoad?: number; // kN
+  liveLoad?: number; // kN
+  safeBearingCapacity: number; // allowable net bearing pressure at founding level, kN/m²
   fck: number;
   fy: number;
-  cover?: number; // default 50
-  loadFactor?: number; // default 1.5 (IS) / 1.4 (ACI approx)
+  cover?: number; // clear cover mm (default 75 ACI/BNBC cast against earth, 50 IS)
+  barDia?: number; // default 16
+  selfWeightPercent?: number; // footing + backfill as % of the column load (default 10)
+  brickAggregate?: boolean;
+  loadFactor?: number; // overrides the factored/service ratio
 }
+
 export interface FootingResult {
-  areaRequired: number; // m²
-  side: number; // m (square)
-  netUpwardPressure: number; // kN/m² factored
-  depth: number; // overall mm
+  code: DesignCode;
+  areaRequired: number;
+  side: number;
+  netUpwardPressure: number;
+  depth: number;
   d: number;
-  Mu: number; // kN·m per full width
+  Mu: number;
   AstRequired: number;
   bars: string;
-  oneWayShear: { ok: boolean; detail: string };
-  punchingShear: { ok: boolean; detail: string };
+  oneWayShear: Check;
+  punchingShear: Check;
+  checks: Check[];
   steps: string[];
 }
 
 export function designIsolatedFooting(inp: FootingInput): FootingResult {
-  const code = inp.code ?? "IS456";
-  const cover = inp.cover ?? 50;
-  const lf = inp.loadFactor ?? (code === "IS456" ? 1.5 : 1.4);
-  const steps: string[] = [];
-  const P = inp.serviceLoad;
-  const areaReq = (P * 1.1) / inp.safeBearingCapacity; // 10% self weight
-  const side = Math.ceil(Math.sqrt(areaReq) * 20) / 20; // round up to 50 mm
-  steps.push(`Area = 1.1·P/SBC = 1.1×${P}/${inp.safeBearingCapacity} = ${areaReq.toFixed(2)} m² → square ${side} × ${side} m`);
-  const pu = (lf * P) / (side * side);
-  steps.push(`Factored net upward pressure pu = ${lf}×${P}/${(side * side).toFixed(2)} = ${pu.toFixed(1)} kN/m²`);
-  const B = side * 1000; // mm
-  const cb = inp.columnB;
-  const cd = inp.columnD;
-  const cantilever = (B - cb) / 2; // mm, along B measured from face of column
-  const Mu = (pu * (cantilever / 1000) ** 2 * side) / 2; // kN·m (full width)
-  steps.push(`Bending at column face: Mu = pu·l²·B/2 = ${Mu.toFixed(1)} kN·m over full width`);
-  // Iterate depth for shear
-  let D = 300;
-  let oneWay = { ok: false, detail: "" };
-  let punching = { ok: false, detail: "" };
-  let d = 0;
-  for (; D <= 2000; D += 50) {
-    d = D - cover - 16;
-    // one-way shear at distance d from column face
-    const Vu1 = (pu * side * (cantilever - d)) / 1000; // kN
-    const tauV1 = (Vu1 * 1e3) / (B * d);
-    const tauC1 = code === "IS456" ? tauC_IS(inp.fck, 0.25) : 0.75 * 0.17 * Math.sqrt(inp.fck);
-    // punching shear at d/2 from column face
-    const bo = 2 * (cb + d + cd + d);
-    const Vu2 = pu * (side * side - ((cb + d) * (cd + d)) / 1e6);
-    const tauV2 = (Vu2 * 1e3) / (bo * d);
-    const tauC2 = code === "IS456" ? 0.25 * Math.sqrt(inp.fck) * Math.min(1, 0.5 + Math.min(cb, cd) / Math.max(cb, cd)) : 0.75 * 0.33 * Math.sqrt(inp.fck);
-    oneWay = { ok: tauV1 <= tauC1, detail: `τv = ${tauV1.toFixed(3)} MPa vs τc = ${tauC1.toFixed(3)} MPa at d from face` };
-    punching = { ok: tauV2 <= tauC2, detail: `τv = ${tauV2.toFixed(3)} MPa vs allowable ${tauC2.toFixed(3)} MPa at d/2 from face (bo = ${bo.toFixed(0)} mm)` };
+  const code = normalizeCode(inp.code ?? DEFAULT_CODE);
+  const aci = CODES[code].family === "ACI";
+  checkMaterials(code, inp.fck, inp.fy);
+  const fc = inp.fck, fy = inp.fy;
+  const cover = inp.cover ?? (aci ? 75 : 50); // ACI 20.5.1.3.1 cast against earth; IS 456 cl. 26.4.2.2
+  const db = inp.barDia ?? 16;
+  const steps: string[] = [CODES[code].label];
+  const P = inp.deadLoad !== undefined || inp.liveLoad !== undefined ? (inp.deadLoad ?? 0) + (inp.liveLoad ?? 0) : inp.serviceLoad ?? 0;
+  if (!(P > 0)) throw new Error("Give the column service load (or dead and live loads)");
+  const Pu = inp.loadFactor ? inp.loadFactor * P
+    : inp.deadLoad !== undefined || inp.liveLoad !== undefined
+      ? aci ? Math.max(1.4 * (inp.deadLoad ?? 0), 1.2 * (inp.deadLoad ?? 0) + 1.6 * (inp.liveLoad ?? 0)) : 1.5 * P
+      : 1.5 * P; // unknown split: 1.5 (IS exact; conservative for 1.2D + 1.6L unless live load exceeds ~75%)
+  const sw = (inp.selfWeightPercent ?? 10) / 100;
+  const areaReq = (P * (1 + sw)) / inp.safeBearingCapacity;
+  const side = Math.ceil(Math.sqrt(areaReq) * 20) / 20;
+  const B = side * 1000;
+  steps.push(`Plan: A = P·(1 + ${sw})/q_allow = ${P}×${(1 + sw).toFixed(2)}/${inp.safeBearingCapacity} = ${areaReq.toFixed(2)} m² → ${side} × ${side} m`);
+  const pu = Pu / (side * side);
+  steps.push(`Factored load Pu = ${Pu.toFixed(0)} kN${inp.deadLoad === undefined && !inp.loadFactor ? " (1.5 × service; give dead and live loads separately for the exact combination)" : ""}; net upward pressure pu = ${pu.toFixed(1)} kN/m²`);
+  const c1 = inp.columnB, c2 = inp.columnD;
+  const lx = (B - Math.min(c1, c2)) / 2; // governing cantilever from the column face (square footing, smaller column side)
+  const Mu = (pu * (lx / 1000) ** 2 * side) / 2; // kN·m over the full width
+  steps.push(`Moment at the column face: Mu = pu·B·l²/2 = ${Mu.toFixed(1)} kN·m (l = ${lx.toFixed(0)} mm)`);
+  const minRatio = slabMinSteelRatio(code, fy) * (inp.brickAggregate && code === "BNBC2020" ? 1.5 : 1);
+  const rt = sqrtFc(fc);
+  let D = Math.max(aci ? 150 + cover + db : 300, 250); // BNBC 6.8.7: ≥ 150 mm above bottom steel; IS 34.1.2 edge ≥ 150
+  D = Math.ceil(D / 25) * 25;
+  let d = 0, As = 0, oneWay: Check = { name: "", ok: false, detail: "" }, punching: Check = { name: "", ok: false, detail: "" };
+  for (; D <= 2500; D += 25) {
+    d = D - cover - db; // average of the two layers
+    const req = designRcBeam({ code, b: B, D, cover: cover + db / 2, fck: fc, fy, Mu, stirrupDia: 0, mainBarDia: db }).AstRequired;
+    As = Math.max(req, minRatio * B * D);
+    const rho = As / (B * d);
+    const Vu1 = (pu * side * Math.max(0, lx - d)) / 1000; // kN, at d from the face
+    const Vu2 = pu * (side * side - ((c1 + d) * (c2 + d)) / 1e6); // kN, at d/2 from the face
+    const bo = 2 * (c1 + d + c2 + d);
+    if (!aci) {
+      const tc = tauC_IS(fc, 100 * rho);
+      oneWay = { name: "One-way shear", ok: (Vu1 * 1e3) / (B * d) <= tc, detail: `τv = ${((Vu1 * 1e3) / (B * d)).toFixed(3)} ≤ τc = ${tc.toFixed(3)} MPa at pt = ${(100 * rho).toFixed(2)}% (IS 456 cl. 34.2.4.1(a), 40.2)` };
+      const ks = Math.min(1, 0.5 + Math.min(c1, c2) / Math.max(c1, c2));
+      const tp = ks * 0.25 * Math.sqrt(fc);
+      punching = { name: "Punching shear", ok: (Vu2 * 1e3) / (bo * d) <= tp, detail: `τv = ${((Vu2 * 1e3) / (bo * d)).toFixed(3)} ≤ ks·0.25√fck = ${tp.toFixed(3)} MPa, bo = ${bo.toFixed(0)} mm (IS 456 cl. 31.6.3)` };
+    } else {
+      const Vc1 = CODES[code].sizeEffectShear ? Math.min(0.66 * lambdaS(d) * Math.cbrt(rho) * rt, 0.42 * rt) * B * d : 0.17 * rt * B * d;
+      oneWay = { name: "One-way shear", ok: Vu1 * 1e3 <= 0.75 * Vc1, detail: `Vu = ${Vu1.toFixed(0)} ≤ φVc = ${((0.75 * Vc1) / 1e3).toFixed(0)} kN${CODES[code].sizeEffectShear ? ` (ACI 318-19 22.5.5.1(c), λs = ${lambdaS(d).toFixed(3)})` : " (BNBC 6.4.10.1.1, Vc = 0.17√f'c·b·d)"}` };
+      const beta = Math.max(c1, c2) / Math.min(c1, c2);
+      const vc = Math.min(0.33, 0.17 * (1 + 2 / beta), 0.083 * (2 + (40 * d) / bo)) * rt * (CODES[code].sizeEffectShear ? lambdaS(d) : 1);
+      punching = { name: "Punching shear", ok: Vu2 * 1e3 <= 0.75 * vc * bo * d, detail: `Vu = ${Vu2.toFixed(0)} ≤ φVc = ${((0.75 * vc * bo * d) / 1e3).toFixed(0)} kN, vc = ${vc.toFixed(3)} MPa, bo = ${bo.toFixed(0)} mm (${CODES[code].sizeEffectShear ? "ACI 318-19 Table 22.6.5.2 with λs" : "BNBC 6.4.10.2.1"})` };
+    }
     if (oneWay.ok && punching.ok) break;
   }
-  steps.push(`Depth from shear checks: D = ${D} mm, d = ${d} mm`);
-  const beam = designRcBeam({ code, b: B, D, cover, fck: inp.fck, fy: inp.fy, Mu, stirrupDia: 0, mainBarDia: 16 });
-  const AstMin = 0.0012 * B * D;
-  const Ast = Math.max(beam.AstRequired, AstMin);
-  const sp = Math.min(Math.floor((B * barArea(16)) / Ast / 10) * 10, 300);
-  steps.push(`Ast = ${Ast.toFixed(0)} mm² over ${side} m → Ø16 @ ${sp} mm c/c both ways`);
-  return {
-    areaRequired: areaReq,
-    side,
-    netUpwardPressure: pu,
-    depth: D,
-    d,
-    Mu,
-    AstRequired: Ast,
-    bars: `Ø16 @ ${sp} mm c/c both ways (bottom)`,
-    oneWayShear: oneWay,
-    punchingShear: punching,
-    steps,
-  };
+  const maxS = aci ? Math.min(3 * D, 450) : 300;
+  const s = Math.max(75, Math.min(Math.floor((B * barArea(db)) / As / 5) * 5, maxS));
+  steps.push(`Depth from shear: D = ${D} mm, d = ${d} mm. As = ${As.toFixed(0)} mm² each way (min ${(minRatio * 100).toFixed(3)}% of B·D) → Ø${db} @ ${s} mm both ways`);
+  const checks: Check[] = [oneWay, punching];
+  // development length from the column face (IS 26.2.1; BNBC 8.2.2 / ACI 25.4.2.3 simplified, clear spacing ≥ 2db)
+  const avail = lx - cover;
+  const ld = !aci ? (db * 0.87 * fy) / (4 * tauBd_IS(fc)) : Math.max(300, ((fy * (code === "ACI318" ? (fy <= 420 ? 1 : 1.15) : 1)) / ((db <= 19 ? 2.1 : 1.7) * rt)) * db);
+  checks.push({ name: "Development length", ok: avail >= ld, detail: `available ${avail.toFixed(0)} mm ≥ ld = ${ld.toFixed(0)} mm${avail < ld ? ": use smaller bars or hooks" : ""}` });
+  // bearing of the column on the footing (ACI 22.8.3.2 / IS 456 cl. 34.4)
+  const A1 = c1 * c2, A2 = B * B;
+  const bearing = !aci ? 0.45 * fc * Math.min(2, Math.sqrt(A2 / A1)) * A1 : 0.65 * 0.85 * fc * Math.min(2, Math.sqrt(A2 / A1)) * A1;
+  checks.push({ name: "Column bearing on footing", ok: Pu * 1e3 <= bearing, detail: `Pu = ${Pu.toFixed(0)} ≤ ${(bearing / 1e3).toFixed(0)} kN${Pu * 1e3 > bearing ? ": provide dowels for the excess" : ""}` });
+  return { code, areaRequired: areaReq, side, netUpwardPressure: pu, depth: D, d, Mu, AstRequired: As, bars: `Ø${db} @ ${s} mm c/c both ways (bottom)`, oneWayShear: oneWay, punchingShear: punching, checks, steps };
 }
