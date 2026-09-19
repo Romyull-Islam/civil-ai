@@ -3,6 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Logo } from "./Logo";
 import { refreshSession, useSession } from "@/lib/client/session";
+import { PasswordInput } from "@/components/PasswordInput";
 
 export function AuthForm({ kind }: { kind: "login" | "signup" }) {
   const session = useSession();
@@ -32,7 +33,7 @@ export function AuthForm({ kind }: { kind: "login" | "signup" }) {
         {company && kind === "signup" && <div className="text-xs text-muted">This account owns the installation: it adds users, enters the licence and the company&apos;s AI keys.</div>}
         {kind === "signup" && <div><label className="label">Name</label><input className="input mt-1" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></div>}
         <div><label className="label">Email</label><input className="input mt-1" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></div>
-        <div><label className="label">Password</label><input className="input mt-1" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={kind === "login" ? "current-password" : "new-password"} /></div>
+        <div><label className="label">Password</label><PasswordInput wrapperClassName="mt-1" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={kind === "login" ? "current-password" : "new-password"} /></div>
         {needsTotp && <div><label className="label">Authenticator code</label><input className="input mt-1 text-center tracking-widest" inputMode="numeric" maxLength={6} value={totp} onChange={(e) => setTotp(e.target.value)} autoFocus /></div>}
         {err && <div className="text-sm text-err">{err}</div>}
         <button className="btn btn-primary justify-center" disabled={busy}>{busy ? "…" : kind === "login" ? "Sign in" : "Sign up"}</button>

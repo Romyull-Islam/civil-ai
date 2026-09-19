@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from "react";
 import { LogOut, User, ShieldCheck } from "lucide-react";
 import { useEffect } from "react";
 import { useSession, logoutClient, accountsMode } from "@/lib/client/session";
+import { PasswordInput } from "@/components/PasswordInput";
 
 // eslint-disable-next-line @next/next/no-img-element
 const Avatar = ({ src }: { src: string }) => <img src={src} alt="" className="w-8 h-8 rounded-full" />;
@@ -34,7 +35,7 @@ export default function AccountPage() {
         <div><span className="label">Models available on your plan</span><ul className="mt-1 grid gap-0.5">{s.allowedModels?.map((m) => <li key={m.provider + m.model} className="text-muted">{m.provider} · {m.model}</li>)}</ul></div>
       </div>
       {s.usage && <div className="card p-4 flex flex-wrap items-center gap-3 text-sm"><span className="font-medium">AI usage</span><span className="text-muted text-xs">{s.usage.remaining === null ? "unlimited (staff)" : `${s.usage.remaining} credits available now`}</span><Link className="btn btn-sm ml-auto" href="/usage">See usage</Link><Link className="btn btn-sm" href="/billing">Billing &amp; receipts</Link></div>}
-      <div className="card p-4 grid gap-2 text-sm"><div className="font-medium">Change password</div><div className="grid sm:grid-cols-2 gap-2"><input className="input" type="password" placeholder="current password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" /><input className="input" type="password" placeholder="new password (8+)" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" /></div>{pwMsg && <div className="text-xs">{pwMsg}</div>}<button className="btn btn-sm justify-self-start" onClick={changePw} disabled={!pw.current || pw.next.length < 8}>Update password</button></div>
+      <div className="card p-4 grid gap-2 text-sm"><div className="font-medium">Change password</div><div className="grid sm:grid-cols-2 gap-2"><PasswordInput placeholder="current password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" /><PasswordInput placeholder="new password (8+)" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" /></div>{pwMsg && <div className="text-xs">{pwMsg}</div>}<button className="btn btn-sm justify-self-start" onClick={changePw} disabled={!pw.current || pw.next.length < 8}>Update password</button></div>
       {tfa && (
         <div className="card p-4 grid gap-2 text-sm">
           <div className="flex items-center gap-2 font-medium"><ShieldCheck size={16} className="text-accent" /> Two-factor authentication (authenticator app){tfa.enabled && <span className="badge text-ok border-ok/40">enabled</span>}{tfa.staff && !tfa.enabled && <span className="badge text-err border-err/40">recommended for staff</span>}</div>
@@ -47,7 +48,7 @@ export default function AccountPage() {
               <div className="flex gap-2"><input className="input !w-40 text-center tracking-widest" inputMode="numeric" maxLength={6} placeholder="000000" value={tcode} onChange={(e) => setTcode(e.target.value)} /><button className="btn btn-primary btn-sm" onClick={() => tfaAction("confirm", { code: tcode })} disabled={tcode.length !== 6}>Confirm</button><button className="btn btn-sm" onClick={() => setSetup(null)}>Cancel</button></div>
             </div>
           )}
-          {tfa.enabled && <div className="flex gap-2 items-center"><input className="input !w-56" type="password" placeholder="password to disable" value={tcode} onChange={(e) => setTcode(e.target.value)} /><button className="btn btn-sm text-err" onClick={() => tfaAction("disable", { password: tcode })} disabled={!tcode}>Disable 2FA</button></div>}
+          {tfa.enabled && <div className="flex gap-2 items-center"><PasswordInput wrapperClassName="w-56" placeholder="password to disable" value={tcode} onChange={(e) => setTcode(e.target.value)} /><button className="btn btn-sm text-err" onClick={() => tfaAction("disable", { password: tcode })} disabled={!tcode}>Disable 2FA</button></div>}
           {tmsg && <div className="text-xs">{tmsg}</div>}
         </div>
       )}

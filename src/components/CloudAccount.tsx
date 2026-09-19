@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Cloud, LogOut } from "lucide-react";
 import { useSession, refreshSession } from "@/lib/client/session";
+import { PasswordInput } from "@/components/PasswordInput";
 
 /** Desktop / self-hosted: link the app to a hosted CivilMate account so cloud models come from your subscription. */
 export function CloudAccount() {
@@ -31,7 +32,7 @@ export function CloudAccount() {
         <div className="grid sm:grid-cols-3 gap-2">
           <input className="input" placeholder="https://your-civil-ai.vercel.app" value={url} onChange={(e) => setUrl(e.target.value)} />
           <input className="input" placeholder="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <div className="flex gap-1"><input className="input" placeholder="password" type="password" value={pw} onChange={(e) => setPw(e.target.value)} /><button className="btn btn-primary" onClick={link} disabled={busy || !url || !email || !pw}>Link</button></div>
+          <div className="flex gap-1"><PasswordInput wrapperClassName="flex-1" placeholder="password" value={pw} onChange={(e) => setPw(e.target.value)} /><button className="btn btn-primary" onClick={link} disabled={busy || !url || !email || !pw}>Link</button></div>
           {err && <div className="text-xs text-err sm:col-span-3">{err}</div>}
         </div>
       )}
