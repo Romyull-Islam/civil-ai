@@ -105,8 +105,9 @@ export async function resendVerification(user: User) {
 export async function verifyEmailAndSignIn(email: string, code: string): Promise<{ user: User; token: string } | null> {
   const db = await getDB();
   const user = await db.getUserByEmail(String(email ?? "").toLowerCase());
-  if (!user || user.disabled) return null;
-  if (!user.emailVerified && !(await verifyEmail(user, code))) return null;
+  // Only an UNVERIFIED account with the right, unexpired code signs in here; verified accounts must use their password.
+  if (!user || user.disabled || user.emailVerified) return null;
+  if (!(await verifyEmail(user, code))) return null;
   const token = newToken();
   await db.createSession({ token, userId: user.id, expires: Date.now() + SESSION_DAYS * 86400000 });
   return { user: { ...user, emailVerified: 1 }, token };

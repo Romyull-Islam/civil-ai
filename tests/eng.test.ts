@@ -441,3 +441,13 @@ describe("house style: no em dashes in displayed text", () => {
     expect(tidyDashes("run `npm ci -- --flag` then — done")).toBe("run `npm ci -- --flag` then, done");
   });
 });
+
+describe("footing depth is increased for flexure, not only shear (regression)", () => {
+  it("300 × 400 column, DL 600 + LL 400 kN on 150 kPa designs instead of failing with a beam error", async () => {
+    const { designIsolatedFooting } = await import("@/lib/eng/rc");
+    const r = designIsolatedFooting({ code: "BNBC2020", columnB: 300, columnD: 400, deadLoad: 600, liveLoad: 400, safeBearingCapacity: 150, fck: 25, fy: 500 });
+    expect(r.checks.every((c) => c.ok)).toBe(true);
+    expect(r.side).toBeGreaterThan(2.5);
+    expect(r.depth).toBeGreaterThanOrEqual(425);
+  });
+});

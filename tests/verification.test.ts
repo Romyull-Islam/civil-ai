@@ -32,6 +32,10 @@ describe("email verification gate", () => {
     const req = new Request("http://x/api/tools", { headers: { cookie: `civil_session=${ok!.token}` } });
     expect(await requireVerifiedUser(req)).not.toBeInstanceOf(Response);
     expect((await login("user@test.example", "password123")).token).toBeTruthy(); // normal sign-in from now on
+    // A verified account can never be entered through the code endpoint (no password): any code, even the old one
+    expect(await verifyEmailAndSignIn("user@test.example", fresh!.verifyCode!)).toBeNull();
+    expect(await verifyEmailAndSignIn("user@test.example", "123456")).toBeNull();
+    expect(await verifyEmailAndSignIn("owner@test.example", "")).toBeNull();
     // Admin setting "never": nobody is held back
     await setSite({ ...(await getSite()), requireEmailVerification: "never" });
     expect(await needsVerification({ ...fresh!, emailVerified: 0 })).toBe(false);

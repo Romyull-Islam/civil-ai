@@ -24,6 +24,8 @@ export const COUNTRY_PRESETS = {
 function guessCountry(): "BD" | "US" {
   try { return /^America\/|^US\/|^Pacific\/Honolulu/.test(Intl.DateTimeFormat().resolvedOptions().timeZone) ? "US" : "BD"; } catch { return "BD"; }
 }
+/** What the server renders (no browser, no time zone): identical on server and client so hydration matches. */
+const SERVER_SETTINGS: AppSettings = { provider: "auto", keys: {}, preferences: { ...COUNTRY_PRESETS.BD }, theme: "dark", autoDeleteDays: 30, autoBackup: false };
 export const DEFAULT_SETTINGS: AppSettings = { provider: typeof window !== "undefined" && (window as unknown as { civilAI?: { desktop?: boolean } }).civilAI?.desktop ? "local-first" : "auto", keys: {}, preferences: { ...COUNTRY_PRESETS[typeof window === "undefined" ? "BD" : guessCountry()] }, theme: "dark", autoDeleteDays: 30, autoBackup: false };
 
 let cache: AppSettings | null = null;
@@ -53,5 +55,5 @@ function subscribe(cb: () => void) {
 
 /** React hook: current settings, re-renders on change, hydration-safe (server snapshot = defaults). */
 export function useSettings(): AppSettings {
-  return useSyncExternalStore(subscribe, loadSettings, () => DEFAULT_SETTINGS);
+  return useSyncExternalStore(subscribe, loadSettings, () => SERVER_SETTINGS);
 }

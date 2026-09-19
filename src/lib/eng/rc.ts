@@ -460,7 +460,11 @@ export function designIsolatedFooting(inp: FootingInput): FootingResult {
   let d = 0, As = 0, oneWay: Check = { name: "", ok: false, detail: "" }, punching: Check = { name: "", ok: false, detail: "" };
   for (; D <= 2500; D += 25) {
     d = D - cover - db; // average of the two layers
-    const req = designRcBeam({ code, b: B, D, cover: cover + db / 2, fck: fc, fy, Mu, stirrupDia: 0, mainBarDia: db }).AstRequired;
+    // Footings are singly reinforced: a depth whose flexure would need compression steel is too shallow, so go deeper.
+    let flex: RcBeamResult;
+    try { flex = designRcBeam({ code, b: B, D, cover: cover + db / 2, fck: fc, fy, Mu, stirrupDia: 0, mainBarDia: db }); } catch { continue; }
+    if (flex.AscRequired > 0) continue;
+    const req = flex.AstRequired;
     As = Math.max(req, minRatio * B * D);
     const rho = As / (B * d);
     const Vu1 = (pu * side * Math.max(0, lx - d)) / 1000; // kN, at d from the face
