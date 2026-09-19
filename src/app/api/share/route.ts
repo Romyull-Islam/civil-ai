@@ -1,4 +1,4 @@
-import { getSessionUser } from "@/lib/saas/service";
+import { getSessionUser, needsVerification } from "@/lib/saas/service";
 import { getDB } from "@/lib/saas/db";
 import { createShare, readShare, SHARE_DAYS } from "@/lib/saas/shares";
 import { hasAccounts } from "@/lib/saas/mode";
@@ -17,6 +17,7 @@ export async function POST(req: Request) {
   if (!hasAccounts()) return Response.json({ error: "Share links are available in the online version" }, { status: 400 });
   const u = await getSessionUser(req);
   if (!u) return Response.json({ error: "Sign in to create a share link" }, { status: 401 });
+  if (await needsVerification(u)) return Response.json({ error: "Please verify your email address first." }, { status: 403 });
   if (!rateLimit(`share:${u.id}`, 30, 3600000)) return Response.json({ error: "Too many share links in the last hour" }, { status: 429 });
   try { const { conversation } = (await req.json()) as { conversation: { title?: string; messages?: [] } }; return Response.json(await createShare(u, conversation), { status: 201 }); }
   catch (e) { return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 }); }

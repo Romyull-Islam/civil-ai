@@ -17,6 +17,8 @@ export interface SessionInfo {
   inTeam?: boolean;
   /** company edition: no account exists yet → offer to create the owner account */
   setupNeeded?: boolean;
+  /** the signed-in user must verify their email before using the app */
+  mustVerify?: boolean;
   /** company edition: licence state (message shown as a banner when set) */
   license?: { status: string; message: string | null; company: string | null; seats: number; expires: string | null; chatAllowed: boolean };
   avatar?: string;

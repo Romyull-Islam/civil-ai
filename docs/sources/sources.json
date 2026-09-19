@@ -637,6 +637,43 @@
    "url": "https://iowadot.gov/design-manual/chapter-2-alignments/2b-superelevation",
    "access": "official",
    "training": "facts"
+  },
+  {
+   "id": "ca-mwelo-appendix-a",
+   "topic": "landscape",
+   "region": "US",
+   "title": "California Model Water Efficient Landscape Ordinance, 23 CCR ch. 2.7, Appendix A worksheet (MAWA, ETWU, ETAF, plant factors, irrigation efficiency)",
+   "publisher": "State of California (via Cornell LII)",
+   "url": "https://www.law.cornell.edu/regulations/california/23-CCR-2-Chapter-2-7-app-A",
+   "access": "official",
+   "training": "text",
+   "usedFor": [
+    "irrigation_water_budget"
+   ],
+   "keyData": "MAWA = ETo×0.62×[ETAF×RLA + 1.0×SLA]; ETAF 0.55 residential, 0.45 non-residential; IE 0.75 overhead, 0.81 drip"
+  },
+  {
+   "id": "ifc-2024-503",
+   "topic": "subdivision",
+   "region": "US",
+   "title": "International Fire Code 2024 §503.2.1 (20 ft access width, 13 ft 6 in clearance) and §503.2.5 (dead ends > 150 ft need a turnaround)",
+   "publisher": "ICC (via up.codes, GSA adoption)",
+   "url": "https://up.codes/viewer/general-services-administration/ifc-2024/chapter/5/fire-service-features",
+   "access": "official",
+   "training": "facts",
+   "usedFor": [
+    "subdivision_layout"
+   ]
+  },
+  {
+   "id": "bd-prldr-2004",
+   "topic": "subdivision",
+   "region": "BD",
+   "title": "Private Residential Land Development Rules 2004 (amended 2012, 2015): numeric requirements NOT verified online; the calculator takes them as inputs",
+   "publisher": "Government of Bangladesh",
+   "url": "http://urp-bd.blogspot.com/2015/02/review-on-private-residential-land.html",
+   "access": "unofficial",
+   "training": "none"
   }
  ]
 }

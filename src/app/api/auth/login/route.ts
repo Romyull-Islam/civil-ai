@@ -9,8 +9,9 @@ export async function POST(req: Request) {
   const e = String(email ?? "").toLowerCase();
   if (await isLocked(e)) return Response.json({ error: "Account temporarily locked after repeated failures. Try again in 15 minutes or reset your password." }, { status: 423 });
   try {
-    const { user, token, needsTotp } = await login(e, password, totp);
+    const { user, token, needsTotp, needsVerification } = await login(e, password, totp);
     if (needsTotp) return Response.json({ needsTotp: true }, { status: 202 });
+    if (needsVerification) { await loginSucceeded(e); return Response.json({ needsVerification: true, email: user.email, error: "Please verify your email first: enter the code we sent to your inbox." }, { status: 403 }); }
     await loginSucceeded(e);
     return new Response(JSON.stringify({ user: publicUser(user), token }), { headers: { "Content-Type": "application/json", "Set-Cookie": sessionCookie(token) } });
   } catch (err) {

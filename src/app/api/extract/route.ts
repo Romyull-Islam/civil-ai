@@ -1,13 +1,13 @@
 /** Extract text from an attached document (PDF, Word, Excel, CSV, text). Signed-in users only (proxy); rate limited. */
 import { extractDocument, MAX_UPLOAD_BYTES } from "@/lib/docs/extract";
 import { rateLimit, clientIp } from "@/lib/saas/security";
-import { getSessionUser } from "@/lib/saas/service";
+import { requireVerifiedUser } from "@/lib/saas/service";
 import { hasAccounts } from "@/lib/saas/mode";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 export async function POST(req: Request) {
-  const user = hasAccounts() ? await getSessionUser(req) : null;
-  if (hasAccounts() && !user) return Response.json({ error: "Sign in first" }, { status: 401 });
+  const user = hasAccounts() ? await requireVerifiedUser(req) : null;
+  if (user instanceof Response) return user;
   if (!rateLimit(`extract:${user?.id ?? clientIp(req)}`, 30, 10 * 60000)) return Response.json({ error: "Too many uploads; try again in a few minutes." }, { status: 429 });
   const fd = await req.formData().catch(() => null);
   const file = fd?.get("file");

@@ -20,10 +20,12 @@ import type { Drawing as DrawingModel, Entity as DrawingEntity } from "@/lib/dra
 import { beamSection, columnSection, footingDrawing, floorPlan, beamElevation } from "@/lib/drawing/templates";
 import { toSvg } from "@/lib/drawing/svg";
 import { type Drawing, DEFAULT_LAYERS } from "@/lib/drawing/types";
-import type { WorkbookSpec } from "@/lib/docs/workbook";
+import type { WorkbookSpec, CellSpec } from "@/lib/docs/workbook";
 import { costEstimate, estimateWorkbook } from "@/lib/eng/estimate";
 import { projectSchedule, scheduleWorkbook } from "@/lib/eng/schedule";
 import { MIX_TOOLS } from "./mix-tools";
+import { subdivide } from "@/lib/eng/subdivision";
+import { plantsForArea, plantsForRow, bulkMaterial, waterBudget, sprinkler } from "@/lib/eng/landscape";
 import { PAVEMENT_TOOLS } from "./pavement-tools";
 import { ROAD_TOOLS } from "./road-tools";
 import { rationalMethod, kirpich, manningQ, normalDepth, sizePipe, type Section } from "@/lib/eng/drainage";
@@ -68,7 +70,7 @@ const in2 = (mm2: number) => `${(mm2 / 645.16).toFixed(2)} in²`;
 
 export interface ToolDef<S extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string;
-  category: "analysis" | "design" | "geotech" | "transport" | "water" | "materials" | "quantities" | "management" | "drawing" | "reference" | "utility";
+  category: "analysis" | "design" | "geotech" | "transport" | "water" | "site" | "materials" | "quantities" | "management" | "drawing" | "reference" | "utility";
   description: string;
   schema: S;
   run: (input: z.infer<S>) => ToolOutput | Promise<ToolOutput>;
@@ -534,6 +536,112 @@ export const TOOLS: ToolDef[] = [
     },
   }),
   def({
+    name: "subdivision_layout",
+    category: "site",
+    description: "Subdivision lot layout and yield for a tract of any shape: rows of lots parallel to the existing road, new internal streets with an access street, open space, lot schedule (Excel), areas and shares (lots, streets, open space), density (lots per acre/hectare, katha per lot), buildable envelope per lot and a DXF site plan. Zoning values (lot size, setbacks, street width) come from the user or the local ordinance; USA adds IFC fire-access checks.",
+    schema: z.object({
+      tract: PLOT_SCHEMA.describe("the land to subdivide; edge 0 (or roadEdges) is the existing road"),
+      units: z.enum(["m", "ft"]).default("m").describe("units of the lot, street and setback dimensions"),
+      lotWidth: z.number().positive().describe("minimum lot frontage"), lotDepth: z.number().positive(),
+      minLotArea: z.number().positive().optional().describe("m² or sq ft"),
+      streetWidth: z.number().positive().describe("right-of-way width of new streets (e.g. 6–9 m in Bangladesh projects, 50 ft typical US local street)"),
+      pavementWidth: z.number().positive().optional().describe("paved width inside the ROW"),
+      accessStreet: z.enum(["left", "right", "none"]).default("left").describe("street from the existing road to the internal streets; none = streets run through to side roads"),
+      openSpacePercent: z.number().min(0).max(60).optional(),
+      setbacks: z.object({ front: z.number().min(0), rear: z.number().min(0), side: z.number().min(0) }).optional(),
+      maxCoveragePercent: z.number().min(1).max(100).optional(), maxBlockLength: z.number().positive().optional(),
+      country: z.enum(["US", "BD", "other"]).default("BD"),
+    }),
+    run: (inp) => {
+      const r = subdivide(inp);
+      const ft = inp.units === "ft";
+      const k = ft ? 1 / 0.3048 : 1000; // drawing units: ft or mm
+      const u = ft ? "ft" : "m", ua = ft ? "sq ft" : "m²";
+      const A = (m2: number) => (ft ? m2 / 0.09290304 : m2);
+      const P = (x: number, y: number) => [x * k, y * k] as [number, number];
+      const rect = (x: number, y: number, w: number, h: number) => [P(x, y), P(x + w, y), P(x + w, y + h), P(x, y + h)];
+      const span = Math.max(...r.tract.points.map((q) => Math.max(q[0], q[1]))) * k;
+      const th = span / 90;
+      const E: DrawingEntity[] = [{ type: "polyline", points: r.tract.points.map(([x, y]) => P(x, y)), closed: true, layer: "CENTER" }];
+      for (const st of r.streets) {
+        const pts = st.vertical ? rect(st.x, st.y, st.width, st.length) : rect(st.x, st.y, st.length, st.width);
+        E.push({ type: "hatch", points: pts, pattern: "earth", layer: "HATCH" }, { type: "polyline", points: pts, closed: true, layer: "DIM" });
+        const cx = st.vertical ? st.x + st.width / 2 : st.x + st.length / 2, cy = st.vertical ? st.y + st.length / 2 : st.y + st.width / 2;
+        E.push({ type: "text", x: cx * k, y: cy * k, text: `${st.name.toUpperCase()} (${(st.width * (ft ? 1 / 0.3048 : 1)).toFixed(ft ? 0 : 1)} ${u} ROW)`, height: th, rotation: st.vertical ? 90 : 0, align: "center", layer: "TEXT" });
+      }
+      for (const l of r.lots) {
+        E.push({ type: "polyline", points: rect(l.x, l.y, l.width, l.depth), closed: true, layer: "OUTLINE" });
+        E.push({ type: "text", x: (l.x + l.width / 2) * k, y: (l.y + l.depth / 2 + th / k * 0.6) * k, text: l.openSpace ? "OPEN SPACE" : `LOT ${l.no}`, height: th, align: "center", layer: "TEXT" });
+        if (!l.openSpace) E.push({ type: "text", x: (l.x + l.width / 2) * k, y: (l.y + l.depth / 2 - th / k * 0.9) * k, text: `${A(l.area).toFixed(0)} ${ua}`, height: th * 0.8, align: "center", layer: "TEXT" });
+      }
+      const W0 = Math.max(...r.tract.points.map((q) => q[0])) * k;
+      E.push({ type: "text", x: W0 / 2, y: -th * 2.5, text: "EXISTING ROAD", height: th * 1.3, align: "center", layer: "TEXT" });
+      const drawing: DrawingModel = { title: `Subdivision: ${r.lotCount} lots`, units: ft ? "ft" : "mm", layers: DEFAULT_LAYERS, entities: E, notes: r.notes };
+      const katha = (m2: number) => (m2 / 66.8901).toFixed(2);
+      const schedule = r.lots.filter((l) => !l.openSpace).map((l) => [l.no, l.row, l.frontsOn, +(l.width * (ft ? 1 / 0.3048 : 1)).toFixed(2), +(l.depth * (ft ? 1 / 0.3048 : 1)).toFixed(2), +A(l.area).toFixed(1), ...(inp.country === "BD" ? [+katha(l.area)] : []), ...(l.buildable ? [+A(l.buildable.area).toFixed(1)] : [])]);
+      const cols = ["Lot", "Row", "Fronts on", `Width ${u}`, `Depth ${u}`, `Area ${ua}`, ...(inp.country === "BD" ? ["Katha"] : []), ...(inp.setbacks ? [`Buildable ${ua}`] : [])];
+      const pct = (x: number) => `${x.toFixed(1)}%`;
+      const summaryRows: CellSpec[][] = [["Tract area", +A(r.tract.area).toFixed(0), ua], ["Lots", r.lotCount, ""], ["Average lot", +A(r.averageLot).toFixed(0), ua], ["Lots (share)", +r.shares.lots.toFixed(1), "%"], ["Streets (share)", +r.shares.streets.toFixed(1), "%"], ["Open space (share)", +r.shares.openSpace.toFixed(1), "%"], ["Remnant (share)", +r.shares.remnant.toFixed(1), "%"], ["Density", +(ft ? r.density.perAcre : r.density.perHectare).toFixed(2), ft ? "lots/acre" : "lots/ha"], ["New street length", +(r.streetLength * (ft ? 1 / 0.3048 : 1)).toFixed(0), u]];
+      const failing = r.checks.filter((c) => !c.ok);
+      return {
+        result: { lotCount: r.lotCount, rows: r.rows, internalStreets: r.internalStreets, averageLot: r.averageLot, tractArea: r.tract.area, shares: r.shares, density: r.density, streetLength: r.streetLength, openSpaceArea: r.openSpaceArea, checks: r.checks, notes: r.notes, units: "m and m² (converted in the summary)" },
+        display: { kind: "drawing", drawing, svg: toSvg(drawing) },
+        workbook: { title: "Subdivision lot schedule", sheets: [{ name: "Lots", title: `Lot schedule: ${r.lotCount} lots`, columns: cols.map((h) => ({ header: h, width: h === "Fronts on" ? 16 : 12 })), rows: schedule }, { name: "Summary", columns: [{ header: "Item", width: 22 }, { header: "Value", width: 14 }, { header: "Unit", width: 12 }], rows: summaryRows, notes: [...r.checks.map((c) => `${c.ok ? "OK" : "FAILS"}: ${c.name}: ${c.detail}`), ...r.notes] }] },
+        summary: `${r.lotCount} lots (average ${A(r.averageLot).toFixed(0)} ${ua}${inp.country === "BD" ? `, ${katha(r.averageLot)} katha` : ""}) in ${r.rows} rows with ${r.internalStreets} new street(s); lots ${pct(r.shares.lots)}, streets ${pct(r.shares.streets)}, open space ${pct(r.shares.openSpace)}, remnant ${pct(r.shares.remnant)}; ${ft ? `${r.density.perAcre.toFixed(2)} lots/acre` : `${r.density.perHectare.toFixed(1)} lots/ha`}.${failing.length ? ` Check: ${failing.map((c) => c.name).join("; ")}.` : ""}`,
+      };
+    },
+  }),
+  def({
+    name: "landscape_quantities",
+    category: "site",
+    description: "Landscape quantities: plants for a bed at square or triangular spacing, plants/trees along a row, and bulk materials (topsoil, mulch, gravel, compost) as volume and bags; turf/sod area with waste. SI (m, m², mm, litre bags) or US (ft, sq ft, in, cu ft bags).",
+    schema: z.object({
+      units: z.enum(["SI", "US"]).default("SI"),
+      bedArea: z.number().positive().optional().describe("planting area m² or sq ft"), spacing: z.number().positive().optional().describe("plant spacing m or ft"), pattern: z.enum(["triangular", "square"]).default("triangular"),
+      rowLength: z.number().positive().optional().describe("hedge / street-tree row length m or ft"), rowSpacing: z.number().positive().optional().describe("spacing along the row m or ft"),
+      materialArea: z.number().positive().optional().describe("area to cover m² or sq ft"), materialDepth: z.number().positive().optional().describe("depth mm or in"), material: z.string().default("mulch"), bagSize: z.number().positive().optional().describe("bag size, litres or cu ft"), allowancePercent: z.number().min(0).max(50).default(10).describe("settlement / compaction allowance"),
+      turfArea: z.number().positive().optional().describe("sod / turf area m² or sq ft"), turfWastePercent: z.number().min(0).max(30).default(5),
+    }),
+    run: (inp) => {
+      const us = inp.units === "US", ua = us ? "sq ft" : "m²", ul = us ? "ft" : "m";
+      const rows: (string | number)[][] = [];
+      const result: Record<string, unknown> = {};
+      if (inp.bedArea && inp.spacing) { const r = plantsForArea(inp.bedArea, inp.spacing, inp.pattern); result.bed = r; rows.push(["Plants in bed", `${r.plants} (${inp.bedArea} ${ua} at ${inp.spacing} ${ul} ${inp.pattern}; ${r.areaPerPlant.toFixed(3)} ${ua} per plant)`]); }
+      if (inp.rowLength && inp.rowSpacing) { const n = plantsForRow(inp.rowLength, inp.rowSpacing); result.row = n; rows.push(["Plants / trees in row", `${n} (${inp.rowLength} ${ul} at ${inp.rowSpacing} ${ul}, both ends)`]); }
+      if (inp.materialArea && inp.materialDepth) { const r = bulkMaterial(inp.materialArea, inp.materialDepth, inp.units, inp.bagSize, inp.allowancePercent); result.material = r; rows.push([inp.material, `${r.volume.toFixed(2)} ${r.unit}${us ? ` (${r.cubicFeet?.toFixed(1)} cu ft)` : ""} incl. ${inp.allowancePercent}% allowance; ${r.bags} bags of ${r.bagSize} ${r.bagUnit}`]); }
+      if (inp.turfArea) { const a = inp.turfArea * (1 + inp.turfWastePercent / 100); result.turf = a; rows.push(["Sod / turf", `${a.toFixed(1)} ${ua} (${inp.turfWastePercent}% waste)`]); }
+      if (!rows.length) throw new Error("Give a bed area and spacing, a row length and spacing, a material area and depth, or a turf area");
+      return { result, display: { kind: "table", title: "Landscape quantities", columns: ["Item", "Quantity"], rows }, summary: rows.map((r) => `${r[0]}: ${r[1]}`).join("; ") };
+    },
+  }),
+  def({
+    name: "irrigation_water_budget",
+    category: "site",
+    description: "Landscape water budget by the California Model Water Efficient Landscape Ordinance method (widely used in the USA): maximum applied water allowance (MAWA, ETAF 0.55 residential / 0.45 non-residential) and estimated use per hydrozone from plant factor and irrigation efficiency (0.75 overhead, 0.81 drip). ETo (annual reference evapotranspiration) must come from local data (CIMIS / Appendix A in California, FAO or local met data elsewhere).",
+    schema: z.object({
+      units: z.enum(["US", "SI"]).default("US").describe("US: ETo in/yr, areas sq ft, gallons; SI: ETo mm/yr, areas m², litres"),
+      eto: z.number().positive().describe("annual reference evapotranspiration"),
+      use: z.enum(["residential", "non_residential"]).default("residential"),
+      zones: z.array(z.object({ name: z.string().optional(), area: z.number().positive(), plantFactor: z.number().min(0).max(1).describe("very low < 0.1, low 0.1–0.3, moderate 0.4–0.6, high 0.7–1.0"), irrigation: z.enum(["overhead", "drip"]).default("overhead"), efficiency: z.number().min(0.3).max(1).optional(), special: z.boolean().default(false).describe("special landscape area (edibles, recreation, recycled water)") })).min(1),
+    }),
+    run: (inp) => {
+      const r = waterBudget(inp);
+      const f = (x: number) => Math.round(x).toLocaleString("en-US");
+      return { result: r, display: { kind: "table", title: `Water budget (${r.unit})`, columns: ["Hydrozone", "Area", "Plant factor", "Efficiency", "PF/IE", "Estimated use"], rows: [...r.zones.map((z) => [z.name || "-", z.area, z.plantFactor, z.efficiency, z.etaf.toFixed(2), f(z.use)]), ["Estimated total water use (ETWU)", "", "", "", "", f(r.etwu)], [`MAWA (ETAF ${r.etafLimit})`, "", "", "", "", f(r.mawa)]] }, summary: `ETWU ${f(r.etwu)} vs MAWA ${f(r.mawa)} ${r.unit}: ${r.ok ? "within the allowance" : "EXCEEDS the allowance (use lower plant factors, drip, or less turf)"}` };
+    },
+  }),
+  def({
+    name: "sprinkler_run_time",
+    category: "site",
+    description: "Sprinkler precipitation rate (PR = 96.3·gpm/area in/h, or 60·L/min/area mm/h) from total flow and area or head spacing (square or triangular), and weekly run time for a required water depth with a distribution uniformity.",
+    schema: z.object({
+      units: z.enum(["US", "SI"]).default("US"), flow: z.number().positive().describe("total flow on the area: gpm or L/min (full-circle equivalent per head for spacing)"),
+      area: z.number().positive().optional().describe("sq ft or m²"), spacing: z.number().positive().optional().describe("head spacing ft or m"), rowSpacing: z.number().positive().optional(), pattern: z.enum(["square", "triangular"]).default("square"),
+      depthPerWeek: z.number().positive().describe("water needed per week, in or mm"), distributionUniformity: z.number().min(0.3).max(1).default(0.75),
+    }),
+    run: (inp) => { const r = sprinkler(inp); return { result: r, summary: `Precipitation rate ${r.precipitationRate.toFixed(2)} ${r.unit}; run ${r.minutesPerWeek.toFixed(0)} minutes per week (DU ${r.distributionUniformity}) for ${inp.depthPerWeek} ${inp.units === "SI" ? "mm" : "in"}` }; },
+  }),
+  def({
     name: "convert_units",
     category: "utility",
     description: `Convert engineering units (incl. Bangladeshi land units: katha = 720 sq ft, decimal/shotangsho = 435.6 sq ft, bigha = 20 katha; cft = ft3, sft = ft2). Categories: ${Object.entries(UNIT_CATALOG).map(([k, v]) => `${k} (${v.join(", ")})`).join("; ")}.`,
@@ -712,6 +820,7 @@ const TOOL_GROUPS: { keys: RegExp; tools: string[] }[] = [
   { keys: /\b(road (design|geometry|alignment|cross[- ]?section|type)|highway\w*|curve\w*|superelevation|super-elevation|camber|sight distance|ssd|isd|osd|stopping distance|chainage|pvi|pvc|pvt|crest|sag|vertical curve|horizontal curve|gradient|widening|carriageway|design speed|alignment|setting out)\b|রাস্তার নকশা|সড়কের নকশা|বাঁক/i, tools: ["horizontal_curve", "curve_radius_superelevation", "sight_distance", "vertical_curve", "road_cross_section"] },
   { keys: /\b(pavement\w*|asphalt|bitumin\w*|carpeting|flexible pavement|rigid pavement|concrete road|esal|msa|cbr|subgrade|sub-?base|base course|aashto|rhd|lged|axle load|traffic load\w*|structural number|parking lot|driveway|road pavement|road thickness)\b|কার্পেটিং|রাস্তার পুরুত্ব/i, tools: ["pavement_flexible_aashto", "pavement_rigid_aashto", "traffic_esal", "pavement_rhd_catalogue"] },
   { keys: /\b(mix design|mix proportion\w*|w\/c|water[- ]cement ratio|trial mix|target strength|aci 211|is 10262|design mix|concrete mix)\b|মিক্স ডিজাইন/i, tools: ["mix_design_aci", "mix_design_is10262", "concrete_materials"] },
+  { keys: /\b(subdivi\w*|lot layout|lot yield|lots|layout of plots|plotting|housing project|residential project|land development|site plan|master ?plan|parcel\w*|landscap\w*|planting|plants?|trees?|shrubs?|hedge|lawn|turf|sod|mulch|topsoil|irrigat\w*|sprinkler\w*|drip|garden\w*|park)\b|প্লট ভাগ|আবাসন প্রকল্প|বাগান|গাছ/i, tools: ["subdivision_layout", "landscape_quantities", "irrigation_water_budget", "sprinkler_run_time"] },
   { keys: /\b(drain\w*|storm ?water|runoff|rainfall|rational method|catchment|culvert|sewer\w*|pipe\w*|manning|channel|gutter|detention|flood\w*|hydraul\w*)\b|ড্রেন|নালা|পানি নিষ্কাশন|বৃষ্টি/i, tools: ["stormwater_runoff", "pipe_channel_flow"] },
   { keys: /\b(schedule|scheduling|programme|program|gantt|cpm|pert|critical path|duration|timeline|time plan|work plan|milestone|how long)\b|সময়সূচি|কতদিন|মাস/i, tools: ["project_schedule"] },
   { keys: /\b(plan|room|layout|house|flat|apartment|villa|duplex|storey|story|stories|shop|mall|office|floor plan|bedroom|kitchen|architect|plot|setback|far|fsi|coverage|katha|bigha)\b|বাড়ি|বাড়ি|ফ্ল্যাট|নকশা|প্ল্যান|কাঠা|বিঘা|তলা/i, tools: ["plan_building", "plan_layout", "plot_stats", "draw_floor_plan", "draw_custom"] },

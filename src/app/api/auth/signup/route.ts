@@ -11,6 +11,8 @@ export async function POST(req: Request) {
   try {
     const { email, password, name } = (await req.json()) as { email: string; password: string; name?: string };
     const { user, token } = await signup(email, password, name);
+    // Verification required: no session yet; the visitor enters the emailed code on /verify.
+    if (!token) return Response.json({ needsVerification: true, email: user.email }, { status: 201 });
     return new Response(JSON.stringify({ user: publicUser(user), token }), { status: 201, headers: { "Content-Type": "application/json", "Set-Cookie": sessionCookie(token) } });
   } catch (e) { return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 }); }
 }

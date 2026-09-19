@@ -15,6 +15,8 @@ export function AuthForm({ kind }: { kind: "login" | "signup" }) {
     const j = await r.json();
     setBusy(false);
     if (r.status === 202 && j.needsTotp) { setNeedsTotp(true); return; }
+    // Email not verified yet: no session; go and enter the emailed code.
+    if (j.needsVerification) { window.location.assign(new URL(`/verify?email=${encodeURIComponent(j.email ?? email)}`, window.location.origin).toString()); return; }
     if (!r.ok) { setErr(j.error ?? "Failed"); return; }
     const info = await refreshSession();
     if (info.user && !info.user.emailVerified) { window.location.assign(new URL("/verify", window.location.origin).toString()); return; }

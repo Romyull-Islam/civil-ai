@@ -1,8 +1,11 @@
 /** Build an .xlsx from a workbook spec (calculator tables, cost estimates, schedules). */
 import { buildWorkbook, type WorkbookSpec } from "@/lib/docs/xlsx";
 import { rateLimit, clientIp } from "@/lib/saas/security";
+import { hasAccounts } from "@/lib/saas/mode";
+import { requireVerifiedUser } from "@/lib/saas/service";
 export const runtime = "nodejs";
 export async function POST(req: Request) {
+  if (hasAccounts()) { const u = await requireVerifiedUser(req); if (u instanceof Response) return u; }
   if (!rateLimit(`xlsx:${clientIp(req)}`, 60, 10 * 60000)) return Response.json({ error: "Too many exports; try again shortly." }, { status: 429 });
   const spec = (await req.json().catch(() => null)) as WorkbookSpec | null;
   if (!spec || !Array.isArray(spec.sheets) || !spec.sheets.length || spec.sheets.length > 10) return Response.json({ error: "Invalid workbook" }, { status: 400 });

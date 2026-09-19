@@ -291,6 +291,21 @@ The Indian NBC 2016 room sizes are available as an option.
 - **Examples reproduced:** HEC-22 Examples 3-3 and 5-1, and the gutter example.
 - **Rainfall intensity** must come from the local IDF curve; for the USA that is NOAA Atlas 14.
 
+### Subdivision and landscape: `subdivision.ts`, `landscape.ts` (11 tests)
+
+**Subdivision layout**
+- **Method:** the tract is cut into rows of lots parallel to the existing road: road | lots | back-to-back lots | new street | lots… An optional access street runs back from the road.
+- **Lots:** each row's usable length is divided equally, so every lot is at least the minimum frontage. Open space is taken from the rows farthest from the road.
+- **Tests:** hand-computed layouts (39, 36 and 34 lots; 50 lots on a 10-acre US tract), plus a check that every lot lies inside an irregular boundary.
+- **US fire access:** IFC 2024 §503.2.1 (20 ft clear width) and §503.2.5 (dead ends longer than 150 ft need a turnaround), both read from the code text.
+- **Local rules are inputs, never assumed:** zoning values, and Bangladesh project rules (Private Residential Land Development Rules 2004), whose numbers could not be verified online.
+- **Scope:** this is a yield study. Street curves, intersections, cul-de-sacs, grading and utilities are not laid out.
+
+**Landscape**
+- **Plant counts:** triangular spacing uses an area of 0.866s² per plant, a geometric identity.
+- **Water budget:** the California Model Water Efficient Landscape Ordinance (MWELO) equations and factors, read from 23 CCR ch. 2.7 Appendix A. The regulation has no numerical example, so the tests are hand-computed.
+- **Sprinkler precipitation rate:** the 96.3 factor is unit conversion (1 gpm on 1 ft² for an hour = 96.25 in).
+
 ### Cost estimates and schedules: `estimate.ts`, `schedule.ts`
 
 - **Cost estimate:** amount = quantity × rate. Overhead, profit, contingency and taxes are applied on the running total and rounded to 2 decimals per line. Rates are never filled in by the software.

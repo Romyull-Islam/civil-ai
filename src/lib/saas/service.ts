@@ -45,7 +45,8 @@ export function sessionCookie(token: string, maxAgeSec = SESSION_DAYS * 86400): 
 
 const validEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
-export async function signup(email: string, password: string, name = ""): Promise<{ user: User; token: string }> {
+/** Creates the account. When email verification is required the visitor is NOT signed in: token is null until the code is confirmed. */
+export async function signup(email: string, password: string, name = ""): Promise<{ user: User; token: string | null }> {
   if (!validEmail(email)) throw new Error("Enter a valid email address");
   if (password.length < 8) throw new Error("Password must be at least 8 characters");
   const db = await getDB();
@@ -58,7 +59,10 @@ export async function signup(email: string, password: string, name = ""): Promis
   const user: User = { id: newId(), email: email.toLowerCase(), name: name.trim().slice(0, 80), passwordHash: hashPassword(password), role, plan: "free", planExpires: null, createdAt: Date.now(), disabled: 0, emailVerified: needVerify && role === "user" ? 0 : 1, verifyCode: code, verifyExpires: code ? Date.now() + 30 * 60000 : null };
   await db.createUser(user);
   // Never keep the visitor waiting on the mail server: wait at most 12 s, then let delivery finish in the background.
-  if (code && !user.emailVerified) await Promise.race([sendVerificationEmail(user, code).catch(() => null), new Promise((r) => setTimeout(r, 12000))]);
+  if (code && !user.emailVerified) {
+    await Promise.race([sendVerificationEmail(user, code).catch(() => null), new Promise((r) => setTimeout(r, 12000))]);
+    return { user, token: null };
+  }
   const token = newToken();
   await db.createSession({ token, userId: user.id, expires: Date.now() + SESSION_DAYS * 86400000 });
   return { user, token };
@@ -71,6 +75,15 @@ export async function verificationRequired(): Promise<boolean> {
   if (site.requireEmailVerification === "never") return false;
   if (site.requireEmailVerification === "always") return true;
   return emailConfigured();
+}
+/** Email verification gate: the user must confirm their address before using the app (unless the admin set "never"). */
+export async function needsVerification(user: User): Promise<boolean> { return !user.emailVerified && (await verificationRequired()); }
+/** Feature APIs on accounts deployments: the signed-in, verified user, or the error response to return. */
+export async function requireVerifiedUser(req: Request): Promise<User | Response> {
+  const u = await getSessionUser(req);
+  if (!u) return Response.json({ error: "Sign in first" }, { status: 401 });
+  if (await needsVerification(u)) return Response.json({ error: "Please verify your email address first (check your inbox for the code)." }, { status: 403 });
+  return u;
 }
 async function sendVerificationEmail(user: User, code: string) {
   const site = await getSite();
@@ -87,6 +100,21 @@ export async function resendVerification(user: User) {
   await (await getDB()).setVerification(user.id, code, Date.now() + 30 * 60000);
   const r = await Promise.race([sendVerificationEmail(user, code).catch(() => ({ delivered: false, via: "error" })), new Promise<null>((res) => setTimeout(() => res(null), 12000))]);
   if (r && !r.delivered) throw new Error("We could not send the email right now. Please try again in a few minutes, or contact support.");
+}
+/** Confirm an address by email + code (no session needed) and sign the user in. Returns the session token, or null. */
+export async function verifyEmailAndSignIn(email: string, code: string): Promise<{ user: User; token: string } | null> {
+  const db = await getDB();
+  const user = await db.getUserByEmail(String(email ?? "").toLowerCase());
+  if (!user || user.disabled) return null;
+  if (!user.emailVerified && !(await verifyEmail(user, code))) return null;
+  const token = newToken();
+  await db.createSession({ token, userId: user.id, expires: Date.now() + SESSION_DAYS * 86400000 });
+  return { user: { ...user, emailVerified: 1 }, token };
+}
+/** Resend a code by email address (no session). Silent when the address is unknown or already verified. */
+export async function resendVerificationByEmail(email: string): Promise<void> {
+  const user = await (await getDB()).getUserByEmail(String(email ?? "").toLowerCase());
+  if (user && !user.emailVerified && !user.disabled) await resendVerification(user);
 }
 export async function verifyEmail(user: User, code: string): Promise<boolean> {
   if (user.emailVerified) return true;
@@ -182,11 +210,16 @@ ${site.appName} support`).catch(() => {}); }
   return t ?? null;
 }
 
-export async function login(email: string, password: string, totpCode?: string): Promise<{ user: User; token: string; needsTotp?: boolean }> {
+export async function login(email: string, password: string, totpCode?: string): Promise<{ user: User; token: string; needsTotp?: boolean; needsVerification?: boolean }> {
   const db = await getDB();
   const user = await db.getUserByEmail(email);
   if (!user || !verifyPassword(password, user.passwordHash)) throw new Error("Invalid email or password");
   if (user.disabled) throw new Error("This account is disabled");
+  // No session until the email is confirmed. The password was right, so (re)send a code if the last one expired.
+  if (await needsVerification(user)) {
+    if (!user.verifyCode || (user.verifyExpires ?? 0) < Date.now()) await resendVerification(user).catch(() => {});
+    return { user, token: "", needsVerification: true };
+  }
   const secret = await db.getSetting(`totp:${user.id}`);
   if (secret) {
     if (!totpCode) return { user, token: "", needsTotp: true };

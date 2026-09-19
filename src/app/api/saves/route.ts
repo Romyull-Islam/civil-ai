@@ -1,4 +1,4 @@
-import { getSessionUser } from "@/lib/saas/service";
+import { getSessionUser, needsVerification } from "@/lib/saas/service";
 import { getDB } from "@/lib/saas/db";
 import { putSave, readSave, quotaFor } from "@/lib/saas/saves";
 import { hasAccounts } from "@/lib/saas/mode";
@@ -15,6 +15,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const u = await auth(req);
   if (!u) return Response.json({ error: "Sign in first" }, { status: 401 });
+  if (await needsVerification(u)) return Response.json({ error: "Please verify your email address first." }, { status: 403 });
   try { const body = await req.json(); return Response.json(await putSave(u, body), { status: 201 }); }
   catch (e) { return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 }); }
 }

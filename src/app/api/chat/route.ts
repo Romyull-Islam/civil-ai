@@ -3,7 +3,7 @@ import type { ChatMessage, AgentEvent } from "@/lib/ai/types";
 import type { KeyBag } from "@/lib/ai/registry";
 import { appMode, hasAccounts, isCompany } from "@/lib/saas/mode";
 import { licenseState } from "@/lib/company/license";
-import { getSessionUser, quota, limitMessage, getServerKeys, chooseModel, recordUsage } from "@/lib/saas/service";
+import { getSessionUser, quota, limitMessage, getServerKeys, chooseModel, recordUsage, needsVerification } from "@/lib/saas/service";
 import { getCloudLink, cloudChat } from "@/lib/saas/cloud";
 import { checkTopic } from "@/lib/ai/topic";
 import { getSite } from "@/lib/saas/site";
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
   if (hasAccounts()) {
     const user = await getSessionUser(req);
     if (!user) return Response.json({ error: "Please sign in to use the assistant." }, { status: 401 });
-    if (!user.emailVerified) return Response.json({ error: "Please verify your email address first (check your inbox for the code)." }, { status: 403 });
+    if (await needsVerification(user)) return Response.json({ error: "Please verify your email address first (check your inbox for the code)." }, { status: 403 });
     if (isCompany()) { const lic = await licenseState(); if (!lic.chatAllowed) return Response.json({ error: lic.message }, { status: 403 }); }
     const q = await quota(user);
     if (q.remaining <= 0) return Response.json({ error: limitMessage(q) }, { status: 429 });

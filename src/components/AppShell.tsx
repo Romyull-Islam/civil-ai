@@ -50,9 +50,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menu]);
+  useEffect(() => {
+    const allowed = ["/login", "/signup", "/verify", "/forgot", "/reset", "/help", "/terms", "/privacy", "/refund-policy"].includes(path) || path.startsWith("/share/") || path.startsWith("/billing/receipt/");
+    if (session?.mustVerify && (session.mode === "saas" || session.mode === "company") && !allowed) window.location.replace("/verify");
+  }, [session?.mustVerify, session?.mode, path]);
   // Auth screens, public share pages and printable receipts render without the app chrome.
   const authPage = ["/login", "/signup", "/verify", "/forgot", "/reset"].includes(path) || path.startsWith("/share/") || path.startsWith("/billing/receipt/");
+  // Unverified accounts may only verify, sign out, or read help and legal pages until the email is confirmed.
+  const openWhileUnverified = authPage || ["/help", "/terms", "/privacy", "/refund-policy"].includes(path);
+  const blocked = accounts && !!session?.mustVerify && !openWhileUnverified;
   if (authPage) return <div className="h-full">{children}</div>;
+  if (blocked) return <div className="h-full flex items-center justify-center p-6 text-sm text-muted">Please verify your email first. <a className="text-accent2 underline ml-1" href="/verify">Enter the code</a></div>;
 
   const user = session?.user;
   const planName = session?.plan?.name ?? (session?.mode === "desktop" ? "Desktop" : session?.mode === "byok" ? "Local" : "");
@@ -135,7 +143,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         {saas && session?.renewal && (session.renewal.status === "expiring" || session.renewal.status === "grace") && <div className={`${session.renewal.status === "grace" ? "bg-err/15 border-err/40" : "bg-accent/15 border-accent/40"} border-b text-sm px-4 py-2`}>{session.renewal.status === "grace" ? `Your ${session.plan?.name} plan has expired; it keeps working for a few more days.` : `Your ${session.plan?.name} plan expires in ${session.renewal.daysLeft} day${session.renewal.daysLeft === 1 ? "" : "s"}.`} <Link href={`/subscribe?plan=${session.user?.plan}`} className="text-accent2 underline">Renew now</Link></div>}
         {session?.mode === "company" && session.license?.message && (staff || !session.license.chatAllowed) && <div className={`${session.license.chatAllowed ? "bg-accent/15 border-accent/40" : "bg-err/15 border-err/40"} border-b text-sm px-4 py-2`}>{session.license.message}</div>}
-        {accounts && session?.user && !session.user.emailVerified && <div className="bg-accent/15 border-b border-accent/40 text-sm px-4 py-2">Please verify your email to use the AI assistant. <Link href="/verify" className="text-accent2 underline">Enter code</Link></div>}
         {children}
       </main>
     </div>

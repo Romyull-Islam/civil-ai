@@ -20,6 +20,11 @@ describe("topic guard", () => {
     "convert 3000 psi to MPa",
     "area of a trapezoid with parallel sides 12 m and 8 m, height 5 m",
     "Prepare a Gantt chart for my project",
+    "design a footing for 800 kN",
+    "floor plan for my house",
+    "project schedule for a 5 storey building",
+    "how much will it cost to build the boundary wall?",
+    "website for construction cost estimation", // a strong civil word wins
   ])("allows: %s", (q) => { expect(decide(q).action).toBe("allow"); });
 
   it.each([
@@ -32,6 +37,11 @@ describe("topic guard", () => {
     "Which crypto should I buy?",
     "I like a lot of music, recommend songs",
     "how far is Chittagong from Dhaka",
+    "plan my vacation to Cox's Bazar",
+    "website design ideas for my shop",
+    "build a mobile app for my business",
+    "logo design for my company",
+    "what is the cost of an iPhone 16",
   ])("refuses locally: %s", (q) => {
     const d = decide(q);
     expect(d.action).toBe("reply");
@@ -45,6 +55,16 @@ describe("topic guard", () => {
     expect(decide("Write a poem", false)).toMatchObject({ action: "allow", reason: "disabled" });
   });
 
+  const offTopic = ["what is the name of capital of Burundi", "what is the name of capital or burundi", "whats makes foods testy", "write a poem or story", "say a joke", "make a birthday wish for my friend", "tell me a funny story", "who is the richest man in the world"];
+  it.each(offTopic)("refuses as a first message: %s", (q) => { expect(decide(q).action).toBe("reply"); });
+  it.each(offTopic)("refuses in the middle of a civil conversation: %s", (q) => {
+    const convo = [user("Design a footing for 800 kN on 150 kPa soil"), bot("Use a 2.4 m square footing, 450 mm deep…")];
+    expect(decide([...convo, user(q)]).action).toBe("reply");
+  });
+  it("still allows real follow-ups", () => {
+    const convo = [user("Design an RC beam, 5 m span, 20 kN/m"), bot("Use 3 × Ø16 bottom bars…")];
+    for (const q of ["why?", "explain step 3", "and for 6 m?", "which one is cheaper?", "is it safe?", "make it M25", "show the steps", "draw it", "what about 20 mm bars?", "কেন?"]) expect(decide([...convo, user(q)]).action, q).toBe("allow");
+  });
   it("allows follow-ups in a civil conversation but not a switch to an unrelated topic", () => {
     const convo = [user("Design a footing for 800 kN on 150 kPa soil"), bot("Use a 2.4 m square footing, 450 mm deep…")];
     expect(decide([...convo, user("why?")]).action).toBe("allow");

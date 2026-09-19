@@ -21,6 +21,10 @@ const PRESETS_US: Record<string, Record<string, unknown>> = {
   plan_building: { plot: { shape: "rectangular", width: 60, depth: 110, units: "ft" }, buildingType: "single_family", storeys: 2, bedrooms: 3, bathrooms: 2, garage: true, dining: true, standard: "IRC2021" },
   stormwater_runoff: { units: "US", areas: [{ label: "Roofs", area: 1.0, C: 0.95 }, { label: "Paved", area: 0.75, C: 0.9 }, { label: "Lawn", area: 1.25, C: 0.2 }], intensity: 4, returnPeriod: 10 },
   pipe_channel_flow: { mode: "size_pipe", units: "US", Q: 9, slope: 0.005, n: 0.013, purpose: "storm" },
+  subdivision_layout: { tract: { shape: "rectangular", width: 660, depth: 660, units: "ft" }, units: "ft", lotWidth: 60, lotDepth: 110, minLotArea: 7200, streetWidth: 50, pavementWidth: 28, accessStreet: "left", openSpacePercent: 10, setbacks: { front: 25, rear: 20, side: 5 }, country: "US" },
+  landscape_quantities: { units: "US", bedArea: 500, spacing: 1.5, pattern: "triangular", rowLength: 300, rowSpacing: 30, materialArea: 500, materialDepth: 3, material: "mulch", turfArea: 2000 },
+  irrigation_water_budget: { units: "US", eto: 50, use: "residential", zones: [{ name: "Lawn", area: 4000, plantFactor: 0.6, irrigation: "overhead" }, { name: "Shrub beds", area: 6000, plantFactor: 0.3, irrigation: "drip" }] },
+  sprinkler_run_time: { units: "US", flow: 4, spacing: 30, pattern: "square", depthPerWeek: 1, distributionUniformity: 0.75 },
   cost_estimate: { project: "Example: house foundation", currency: "USD", rateSource: "EXAMPLE RATES ONLY: replace with your bids or cost data", overheadPercent: 8, profitPercent: 10, items: [{ description: "Excavation", unit: "cy", quantity: 160, rate: 12, category: "Earthwork" }, { description: "Footing concrete, 4000 psi", unit: "cy", quantity: 50, rate: 185, category: "Concrete" }, { description: "Rebar, Grade 60, placed", unit: "lb", quantity: 7000, rate: 1.1, category: "Reinforcement" }] },
 };
 /** Region-dependent choices every calculator exposes (code, standard, units, weekend, currency). */
@@ -37,7 +41,7 @@ function regionize(schema: Record<string, unknown>, values: Record<string, unkno
 }
 
 interface ToolMeta { name: string; category: string; description: string; schema: Record<string, unknown> }
-const CATS: Record<string, string> = { analysis: "Analysis", design: "Design", geotech: "Geotechnical", transport: "Roads & pavements", water: "Water & drainage", materials: "Concrete & materials", quantities: "Quantities & BOQ", management: "Cost & schedule", utility: "Utilities", reference: "Reference", drawing: "Drawings" };
+const CATS: Record<string, string> = { analysis: "Analysis", design: "Design", geotech: "Geotechnical", transport: "Roads & pavements", water: "Water & drainage", site: "Site, subdivision & landscape", materials: "Concrete & materials", quantities: "Quantities & BOQ", management: "Cost & schedule", utility: "Utilities", reference: "Reference", drawing: "Drawings" };
 /** One colour per category (heading, marker and selected item), readable in light and dark themes. */
 const CAT_COLOR: Record<string, { text: string; dot: string; active: string }> = {
   analysis: { text: "text-sky-600 dark:text-sky-400", dot: "bg-sky-500", active: "border-sky-500 bg-sky-500/10" },
@@ -45,6 +49,7 @@ const CAT_COLOR: Record<string, { text: string; dot: string; active: string }> =
   geotech: { text: "text-emerald-600 dark:text-emerald-400", dot: "bg-emerald-500", active: "border-emerald-500 bg-emerald-500/10" },
   transport: { text: "text-indigo-600 dark:text-indigo-400", dot: "bg-indigo-500", active: "border-indigo-500 bg-indigo-500/10" },
   water: { text: "text-cyan-600 dark:text-cyan-400", dot: "bg-cyan-500", active: "border-cyan-500 bg-cyan-500/10" },
+  site: { text: "text-fuchsia-600 dark:text-fuchsia-400", dot: "bg-fuchsia-500", active: "border-fuchsia-500 bg-fuchsia-500/10" },
   materials: { text: "text-lime-700 dark:text-lime-400", dot: "bg-lime-500", active: "border-lime-500 bg-lime-500/10" },
   quantities: { text: "text-violet-600 dark:text-violet-400", dot: "bg-violet-500", active: "border-violet-500 bg-violet-500/10" },
   management: { text: "text-orange-600 dark:text-orange-400", dot: "bg-orange-500", active: "border-orange-500 bg-orange-500/10" },
@@ -74,6 +79,10 @@ const PRESETS: Record<string, Record<string, unknown>> = {
   plan_building: { plot: { shape: "trapezoid", frontWidth: 12, rearWidth: 10, depth: 20, units: "m" }, buildingType: "single_family", storeys: 2, bedrooms: 3, garage: true, roadWidth: 6 },
   stormwater_runoff: { units: "SI", areas: [{ label: "Roofs", area: 0.4, C: 0.95 }, { label: "Paved", area: 0.3, C: 0.9 }, { label: "Lawn", area: 0.5, C: 0.2 }], intensity: 100, returnPeriod: 10 },
   pipe_channel_flow: { mode: "size_pipe", units: "SI", Q: 0.25, slope: 0.005, n: 0.013, purpose: "storm" },
+  subdivision_layout: { tract: { shape: "rectangular", width: 200, depth: 110, units: "m" }, units: "m", lotWidth: 10, lotDepth: 20, streetWidth: 7.5, accessStreet: "left", openSpacePercent: 10, setbacks: { front: 1.5, rear: 1.5, side: 1 }, country: "BD" },
+  landscape_quantities: { units: "SI", bedArea: 50, spacing: 0.5, pattern: "triangular", rowLength: 60, rowSpacing: 6, materialArea: 50, materialDepth: 75, material: "mulch", turfArea: 200 },
+  irrigation_water_budget: { units: "SI", eto: 1500, use: "residential", zones: [{ name: "Lawn", area: 300, plantFactor: 0.7, irrigation: "overhead" }, { name: "Shrub beds", area: 200, plantFactor: 0.3, irrigation: "drip" }] },
+  sprinkler_run_time: { units: "SI", flow: 15, area: 100, depthPerWeek: 25, distributionUniformity: 0.75 },
   convert_units: { value: 5, from: "katha", to: "sqft" },
   calculate: { expression: "0.85*25*250*0.8*150/1e3" },
   search_code_clauses: { query: "minimum cover", limit: 5 },
