@@ -10,6 +10,9 @@ import { isUsable } from "@/lib/ai/quality";
 import { PROVIDERS, type KeyBag } from "@/lib/ai/registry";
 import { sendEmail, emailConfigured } from "./email";
 import { getSite } from "./site";
+import { isCompany } from "./mode";
+import { companyPlan } from "@/lib/company";
+import { assertSeatAvailable } from "@/lib/company/license";
 import type { Payment, Ticket } from "./db";
 
 export const SESSION_COOKIE = "civil_session";
@@ -62,6 +65,7 @@ export async function signup(email: string, password: string, name = ""): Promis
 
 /** Email verification policy: "auto" requires it only when an email API key is configured (otherwise codes could not be delivered). */
 export async function verificationRequired(): Promise<boolean> {
+  if (isCompany()) return false; // accounts are created by the company's admin
   const site = await getSite();
   if (site.requireEmailVerification === "never") return false;
   if (site.requireEmailVerification === "always") return true;
@@ -199,6 +203,7 @@ export async function logout(req: Request) {
 
 // ---------- plans ----------
 export async function getPlans(): Promise<Plan[]> {
+  if (isCompany()) return [await companyPlan()];
   const raw = await (await getDB()).getSetting("plans");
   if (!raw) return DEFAULT_PLANS;
   try { const p = JSON.parse(raw) as Plan[]; return Array.isArray(p) && p.length ? p.map(withCreditDefaults) : DEFAULT_PLANS; } catch { return DEFAULT_PLANS; }
@@ -229,6 +234,7 @@ export async function fulfilPayment(p: Payment): Promise<{ label: string; until:
 }
 
 export async function planFor(user: User): Promise<Plan> {
+  if (isCompany()) return companyPlan();
   const plans = await getPlans();
   // Team membership grants the team's plan to every member while the team subscription is active (incl. grace).
   const team = await (await getDB()).getTeamForUser(user.id);
@@ -457,6 +463,7 @@ export async function createAccount(email: string, password: string, role: Role,
   if (password.length < 8) throw new Error("Password must be at least 8 characters");
   const db = await getDB();
   if (await db.getUserByEmail(email)) throw new Error("An account with this email already exists");
+  if (isCompany()) await assertSeatAvailable();
   const user: User = { id: newId(), email: email.toLowerCase(), name: name.trim().slice(0, 80), passwordHash: hashPassword(password), role, plan: "free", planExpires: null, createdAt: Date.now(), disabled: 0, emailVerified: 1, verifyCode: null, verifyExpires: null };
   await db.createUser(user);
   const site = await getSite();

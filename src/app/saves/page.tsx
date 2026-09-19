@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CloudDownload, Trash2, MessageSquare, PencilRuler, Cloud } from "lucide-react";
-import { useSession } from "@/lib/client/session";
+import { useSession, accountsMode } from "@/lib/client/session";
 import { db, type Conversation } from "@/lib/db";
 import { toDxf } from "@/lib/drawing/dxf";
 import type { Drawing } from "@/lib/drawing/types";
@@ -20,7 +20,7 @@ export default function SavesPage() {
   const restoreChat = async (id: string) => { const j = await (await fetch(`/api/saves?id=${id}`)).json(); const conv = j.payload as Conversation; await db.conversations.put({ ...conv, updatedAt: now() }); setMsg(`Restored "${conv.title}" to this device. Open it from the Assistant.`); };
   const downloadDrawing = async (id: string, fmt: "dxf" | "json") => { const j = await (await fetch(`/api/saves?id=${id}`)).json(); const d = j.payload as Drawing; const blob = new Blob([fmt === "dxf" ? toDxf(d) : JSON.stringify(d, null, 1)], { type: fmt === "dxf" ? "application/dxf" : "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${d.title.replace(/[^a-z0-9]+/gi, "-")}.${fmt}`; a.click(); };
   const remove = async (id: string) => { if (!confirm("Delete this saved item from your account?")) return; await fetch("/api/saves", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }); load(); };
-  if (s && s.mode !== "saas") return <div className="p-6 text-sm text-muted">Cloud backups are part of the online service.</div>;
+  if (s && !accountsMode(s)) return <div className="p-6 text-sm text-muted">Cloud backups are part of the online service.</div>;
   return (
     <div className="h-full overflow-y-auto"><div className="max-w-3xl mx-auto p-6 grid gap-4">
       <div className="flex items-center gap-2"><Cloud className="text-accent" /><h1 className="text-lg font-semibold">My cloud backups</h1></div>

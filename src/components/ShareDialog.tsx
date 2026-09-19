@@ -3,12 +3,12 @@ import { useState } from "react";
 import { X, Link2, Copy, Check, Download, FileJson, Share2, Mail, MessageCircle, Trash2 } from "lucide-react";
 import type { Conversation } from "@/lib/db";
 import { conversationToMarkdown, downloadMarkdown, downloadJson } from "@/lib/client/chat-export";
-import { useSession } from "@/lib/client/session";
+import { useSession, accountsMode } from "@/lib/client/session";
 
 /** Download / copy / share a conversation. Share links exist only in the online (SaaS) version. */
 export function ShareDialog({ conv, onClose }: { conv: Conversation; onClose: () => void }) {
   const session = useSession();
-  const online = session?.mode === "saas" && !!session.user;
+  const online = accountsMode(session) && !!session?.user;
   const [link, setLink] = useState<{ id: string; url: string; expiresAt: number } | null>(null);
   const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null); const [copied, setCopied] = useState<string | null>(null);
   const copy = async (what: string, text: string) => { try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(null), 2000); } catch { setErr("Copy failed. Select and copy manually."); } };

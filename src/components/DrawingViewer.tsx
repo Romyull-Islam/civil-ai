@@ -1,7 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
 import { Download, ZoomIn, ZoomOut, Maximize2, CloudUpload } from "lucide-react";
-import { useSession } from "@/lib/client/session";
+import { useSession, accountsMode } from "@/lib/client/session";
 import type { Drawing } from "@/lib/drawing/types";
 import { toDxf } from "@/lib/drawing/dxf";
 import { toSvg } from "@/lib/drawing/svg";
@@ -53,7 +53,7 @@ export function DrawingViewer({ drawing, svg, height = 360 }: { drawing: Drawing
           <button className="btn btn-sm" onClick={() => download(`${slug(drawing.title)}.dxf`, toDxf(drawing), "application/dxf")} title="Download DXF (AutoCAD, BricsCAD, LibreCAD, Revit)"><Download size={14} /> DXF</button>
           <button className="btn btn-sm" onClick={() => download(`${slug(drawing.title)}.svg`, markup, "image/svg+xml")}><Download size={14} /> SVG</button>
           <button className="btn btn-sm" onClick={exportPng}><Download size={14} /> PNG</button>
-          {session?.mode === "saas" && (session.cloudQuota?.limitBytes ?? 0) > 0 && <button className="btn btn-sm" onClick={saveToAccount} title="Save to my account (cloud)"><CloudUpload size={14} /> Save</button>}
+          {accountsMode(session) && (session?.cloudQuota?.limitBytes ?? 0) > 0 && <button className="btn btn-sm" onClick={saveToAccount} title="Save to my account (cloud)"><CloudUpload size={14} /> Save</button>}
         </div>
       </div>
       <div

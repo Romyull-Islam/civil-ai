@@ -1,9 +1,9 @@
-import { appMode } from "@/lib/saas/mode";
+import { hasAccounts } from "@/lib/saas/mode";
 import { login, sessionCookie, publicUser } from "@/lib/saas/service";
 import { rateLimit, clientIp, isLocked, loginFailed, loginSucceeded } from "@/lib/saas/security";
 export const runtime = "nodejs";
 export async function POST(req: Request) {
-  if (appMode() !== "saas") return Response.json({ error: "Accounts are only used in SaaS mode" }, { status: 400 });
+  if (!hasAccounts()) return Response.json({ error: "Accounts are only used in SaaS mode" }, { status: 400 });
   if (!rateLimit(`login:${clientIp(req)}`, 30, 15 * 60000)) return Response.json({ error: "Too many attempts, try again later" }, { status: 429 });
   const { email, password, totp } = (await req.json()) as { email: string; password: string; totp?: string };
   const e = String(email ?? "").toLowerCase();

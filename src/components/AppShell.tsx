@@ -6,7 +6,7 @@ import { MessageSquare, Calculator, PencilRuler, BookOpen, Settings, Menu, X, Sh
 import { downloadMarkdown } from "@/lib/client/chat-export";
 import { PromoBanner } from "./PromoBanner";
 import { useSettings } from "@/lib/client/settings";
-import { useSession, logoutClient } from "@/lib/client/session";
+import { useSession, logoutClient, accountsMode } from "@/lib/client/session";
 import { usePersistedFlag } from "@/lib/client/persist";
 import { db } from "@/lib/db";
 import { Logo, LogoMark } from "./Logo";
@@ -31,7 +31,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const settings = useSettings();
   const session = useSession();
-  const saas = session?.mode === "saas";
+  const saas = session?.mode === "saas"; // hosted service: plans, billing, promotions
+  const accounts = accountsMode(session); // hosted service or company install: sign-in, usage, backups, admin
   const [recents, setRecents] = useState<{ id: string; title: string }[]>([]);
   useEffect(() => {
     const dark = settings.theme === "dark" || (settings.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -55,14 +56,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const user = session?.user;
   const planName = session?.plan?.name ?? (session?.mode === "desktop" ? "Desktop" : session?.mode === "byok" ? "Local" : "");
-  const staff = saas && user && user.role !== "user";
+  const staff = accounts && user && user.role !== "user";
   const menuItems: { href: string; label: string; icon: typeof Settings; show: boolean }[] = [
     { href: "/settings", label: "Settings", icon: Settings, show: true },
-    { href: "/usage", label: "Usage", icon: BarChart3, show: saas && !!user },
+    { href: "/usage", label: "Usage", icon: BarChart3, show: accounts && !!user },
     { href: user ? "/billing" : "/pricing", label: "Plans & billing", icon: CreditCard, show: saas },
     { href: "/subscribe", label: session?.plan?.id === "free" ? "Upgrade plan" : "Renew / change plan", icon: Sparkles, show: saas && !!user },
-    { href: "/account", label: "Account & security", icon: User, show: saas && !!user },
-    { href: "/saves", label: "Cloud backups", icon: Cloud, show: saas && !!user },
+    { href: "/account", label: "Account & security", icon: User, show: accounts && !!user },
+    { href: "/saves", label: session?.mode === "company" ? "Server backups" : "Cloud backups", icon: Cloud, show: accounts && !!user },
     { href: "/team", label: "Team", icon: Users, show: saas && !!session?.inTeam },
     { href: "/admin", label: user?.role === "support" ? "Helpdesk" : "Admin", icon: Shield, show: !!staff },
     { href: "/help", label: "Help & support", icon: LifeBuoy, show: true },
@@ -115,13 +116,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="absolute bottom-full left-2 right-2 mb-1 card p-1 shadow-xl z-50 min-w-56">
               {user && <div className="px-3 py-2 text-xs text-muted border-b border-border mb-1 truncate">{user.email}{planName ? ` · ${planName} plan` : ""}{session?.usage?.remaining != null ? ` · ${session.usage.remaining} AI credits left` : ""}</div>}
               {menuItems.filter((m) => m.show).map(({ href, label, icon: Icon }) => <Link key={href} href={href} onClick={() => { setMenu(false); setOpen(false); }} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-fg hover:bg-elev2"><Icon size={16} className="text-muted" /> {label}</Link>)}
-              {saas && user && <button className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-err hover:bg-elev2" onClick={logoutClient}><LogOut size={16} /> Sign out</button>}
-              {saas && !user && <Link href="/login" onClick={() => setMenu(false)} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-fg hover:bg-elev2"><User size={16} className="text-muted" /> Sign in</Link>}
+              {accounts && user && <button className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-err hover:bg-elev2" onClick={logoutClient}><LogOut size={16} /> Sign out</button>}
+              {accounts && !user && <Link href="/login" onClick={() => setMenu(false)} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-fg hover:bg-elev2"><User size={16} className="text-muted" /> Sign in</Link>}
             </div>
           )}
           <button className={`w-full flex items-center gap-3 rounded-lg ${collapsed ? "justify-center px-0" : "px-2"} py-2 hover:bg-elev2 text-left`} onClick={() => setMenu((v) => !v)} title="Account menu">
             <Avatar src={session?.avatar} />
-            {!collapsed && <div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{user ? (user.name || user.email.split("@")[0]) : saas ? "Sign in" : "You"}</div><div className="text-[11px] text-muted truncate">{user ? (user.role !== "user" ? `${user.role[0].toUpperCase()}${user.role.slice(1)} · ${planName} plan` : `${planName} plan`) : saas ? "Free to start" : planName}</div></div>}
+            {!collapsed && <div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{user ? (user.name || user.email.split("@")[0]) : accounts ? "Sign in" : "You"}</div><div className="text-[11px] text-muted truncate">{user ? (user.role !== "user" ? `${user.role[0].toUpperCase()}${user.role.slice(1)} · ${planName} plan` : `${planName} plan`) : saas ? "Free to start" : planName}</div></div>}
             {!collapsed && <ChevronUp size={14} className={`text-muted transition ${menu ? "rotate-180" : ""}`} />}
           </button>
         </div>
@@ -133,7 +134,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Logo size={22} />
         </div>
         {saas && session?.renewal && (session.renewal.status === "expiring" || session.renewal.status === "grace") && <div className={`${session.renewal.status === "grace" ? "bg-err/15 border-err/40" : "bg-accent/15 border-accent/40"} border-b text-sm px-4 py-2`}>{session.renewal.status === "grace" ? `Your ${session.plan?.name} plan has expired; it keeps working for a few more days.` : `Your ${session.plan?.name} plan expires in ${session.renewal.daysLeft} day${session.renewal.daysLeft === 1 ? "" : "s"}.`} <Link href={`/subscribe?plan=${session.user?.plan}`} className="text-accent2 underline">Renew now</Link></div>}
-        {saas && session?.user && !session.user.emailVerified && <div className="bg-accent/15 border-b border-accent/40 text-sm px-4 py-2">Please verify your email to use the AI assistant. <Link href="/verify" className="text-accent2 underline">Enter code</Link></div>}
+        {session?.mode === "company" && session.license?.message && (staff || !session.license.chatAllowed) && <div className={`${session.license.chatAllowed ? "bg-accent/15 border-accent/40" : "bg-err/15 border-err/40"} border-b text-sm px-4 py-2`}>{session.license.message}</div>}
+        {accounts && session?.user && !session.user.emailVerified && <div className="bg-accent/15 border-b border-accent/40 text-sm px-4 py-2">Please verify your email to use the AI assistant. <Link href="/verify" className="text-accent2 underline">Enter code</Link></div>}
         {children}
       </main>
     </div>

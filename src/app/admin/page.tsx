@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { Shield, KeyRound, Users, BarChart3, Layers, Save, RefreshCw, Wallet, LifeBuoy, Globe, LayoutDashboard, UsersRound, CreditCard, ExternalLink, CheckCircle2, Circle, Megaphone, Plus, Trash2 } from "lucide-react";
+import { Building2, Shield, KeyRound, Users, BarChart3, Layers, Save, RefreshCw, Wallet, LifeBuoy, Globe, LayoutDashboard, UsersRound, CreditCard, ExternalLink, CheckCircle2, Circle, Megaphone, Plus, Trash2 } from "lucide-react";
 import { PromoCard } from "@/components/PromoBanner";
 import type { Promo } from "@/lib/saas/site";
 import { friendlyModel, TIER_LABEL } from "@/lib/ai/friendly";
@@ -12,14 +12,21 @@ import { modelQuality, type QualityStatus } from "@/lib/ai/quality";
 import { useSession } from "@/lib/client/session";
 import type { Plan } from "@/lib/saas/plans";
 
-type Tab = "overview" | "promos" | "users" | "keys" | "plans" | "usage" | "payments" | "support" | "site" | "gateways" | "teams";
+type Tab = "overview" | "promos" | "users" | "keys" | "plans" | "usage" | "payments" | "support" | "site" | "gateways" | "teams" | "company";
 type Role = "superadmin" | "admin" | "support" | "user";
 interface AdminUser { id: string; email: string; name: string; role: Role; plan: string; planExpires: number | null; createdAt: number; disabled: number }
-const TAB_ROLES: Record<Tab, Role[]> = { overview: ["superadmin", "admin", "support"], promos: ["superadmin", "admin"], gateways: ["superadmin", "admin"], teams: ["superadmin", "admin", "support"], users: ["superadmin", "admin", "support"], payments: ["superadmin", "admin", "support"], support: ["superadmin", "admin", "support"], keys: ["superadmin", "admin"], plans: ["superadmin", "admin"], site: ["superadmin", "admin"], usage: ["superadmin", "admin"] };
+const TAB_ROLES: Record<Tab, Role[]> = { overview: ["superadmin", "admin", "support"], promos: ["superadmin", "admin"], gateways: ["superadmin", "admin"], teams: ["superadmin", "admin", "support"], users: ["superadmin", "admin", "support"], payments: ["superadmin", "admin", "support"], support: ["superadmin", "admin", "support"], keys: ["superadmin", "admin"], plans: ["superadmin", "admin"], site: ["superadmin", "admin"], usage: ["superadmin", "admin"], company: ["superadmin", "admin"] };
 const GROUPS: { title: string; items: [Tab, typeof Users, string][] }[] = [
   { title: "", items: [["overview", LayoutDashboard, "Overview"]] },
   { title: "Customers", items: [["users", Users, "Users & plans"], ["payments", Wallet, "Payments"], ["support", LifeBuoy, "Support tickets"], ["teams", UsersRound, "Teams"]] },
   { title: "Service setup", items: [["plans", Layers, "Plans & models"], ["keys", KeyRound, "AI provider keys"], ["gateways", CreditCard, "Payment gateways"], ["site", Globe, "Site, contacts & legal"], ["promos", Megaphone, "Banners & ads"]] },
+  { title: "Reports", items: [["usage", BarChart3, "Usage"]] },
+];
+/** Company edition: no customers, payments, plans or promotions; licence and limits live on the Company tab. */
+const COMPANY_GROUPS: typeof GROUPS = [
+  { title: "", items: [["overview", LayoutDashboard, "Overview"]] },
+  { title: "People", items: [["users", Users, "Users"]] },
+  { title: "Setup", items: [["company", Building2, "Company, licence & limits"], ["keys", KeyRound, "AI provider keys"], ["site", Globe, "Name, contacts & policies"]] },
   { title: "Reports", items: [["usage", BarChart3, "Usage"]] },
 ];
 const PREVIEWS: [string, string][] = [["/pricing", "Plans page"], ["/subscribe", "Checkout page"], ["/help", "Help & FAQ"], ["/terms", "Terms"], ["/privacy", "Privacy"], ["/refund-policy", "Refund policy"], ["/", "Assistant"]];
@@ -41,14 +48,16 @@ export default function AdminPage() {
   useEffect(() => { fetch("/api/admin/overview").then((r) => (r.ok ? r.json() : null)).then((j) => j && setBadges({ payments: j.counts.pendingPayments, support: j.counts.openTickets })).catch(() => {}); }, [tab]);
   if (!s) return <div className="p-6 text-sm text-muted">Loading…</div>;
   const role = s.user?.role ?? "user";
-  if (s.mode !== "saas" || role === "user") return <div className="p-6 text-sm text-err">Staff access only.</div>;
-  const allowed = (t: Tab) => TAB_ROLES[t].includes(role);
+  if ((s.mode !== "saas" && s.mode !== "company") || role === "user") return <div className="p-6 text-sm text-err">Staff access only.</div>;
+  const company = s.mode === "company";
+  const groups = company ? COMPANY_GROUPS : GROUPS;
+  const allowed = (t: Tab) => TAB_ROLES[t].includes(role) && groups.some((g) => g.items.some(([id]) => id === t));
   const current = allowed(tab) ? tab : "overview";
   return (
     <div className="h-full flex min-h-0">
       <nav className="hidden md:flex w-56 shrink-0 flex-col gap-3 border-r border-border p-3 overflow-y-auto">
         <div className="flex items-center gap-2 px-2"><Shield size={18} className="text-accent" /><span className="font-semibold">{role === "support" ? "Helpdesk" : "Admin"}</span><span className="badge ml-auto">{role}</span></div>
-        {GROUPS.map((g) => { const items = g.items.filter(([id]) => allowed(id)); if (!items.length) return null; return (
+        {groups.map((g) => { const items = g.items.filter(([id]) => allowed(id)); if (!items.length) return null; return (
           <div key={g.title} className="grid gap-0.5">
             {g.title && <div className="label px-2 pt-1">{g.title}</div>}
             {items.map(([id, Icon, label]) => { const n = id === "payments" ? badges.payments : id === "support" ? badges.support : 0; return (
@@ -56,9 +65,9 @@ export default function AdminPage() {
           </div>); })}
       </nav>
       <div className="flex-1 min-w-0 overflow-y-auto"><div className="max-w-6xl mx-auto p-4 grid gap-4">
-        <select className="select md:hidden" value={current} onChange={(e) => setTab(e.target.value as Tab)}>{GROUPS.flatMap((g) => g.items).filter(([id]) => allowed(id)).map(([id, , label]) => <option key={id} value={id}>{label}</option>)}</select>
+        <select className="select md:hidden" value={current} onChange={(e) => setTab(e.target.value as Tab)}>{groups.flatMap((g) => g.items).filter(([id]) => allowed(id)).map(([id, , label]) => <option key={id} value={id}>{label}</option>)}</select>
         {current === "overview" && <OverviewTab go={setTab} admin={role !== "support"} />}
-        {current === "users" && <UsersTab me={s.user!} />}{current === "teams" && <TeamsTab />}{current === "payments" && <PaymentsTab />}{current === "support" && <SupportTab />}{current === "keys" && <KeysTab />}{current === "gateways" && <GatewaysTab />}{current === "plans" && <><PlansTab /><CreditPacksEditor /></>}{current === "site" && <SiteTab />}{current === "usage" && <UsageTab />}{current === "promos" && <PromosTab />}
+        {current === "users" && <UsersTab me={s.user!} company={company} />}{current === "company" && <CompanyTab />}{current === "teams" && <TeamsTab />}{current === "payments" && <PaymentsTab />}{current === "support" && <SupportTab />}{current === "keys" && <KeysTab />}{current === "gateways" && <GatewaysTab />}{current === "plans" && <><PlansTab /><CreditPacksEditor /></>}{current === "site" && <SiteTab />}{current === "usage" && <UsageTab />}{current === "promos" && <PromosTab />}
       </div></div>
     </div>
   );
@@ -121,41 +130,45 @@ function OverviewTab({ go, admin }: { go: (t: Tab) => void; admin: boolean }) {
   );
 }
 
-function UsersTab({ me }: { me: { id: string; role: Role } }) {
+function UsersTab({ me, company = false }: { me: { id: string; role: Role }; company?: boolean }) {
   const [users, setUsers] = useState<AdminUser[]>([]); const [plans, setPlans] = useState<Plan[]>([]); const [q, setQ] = useState("");
-  const [nu, setNu] = useState({ email: "", password: "", role: "support" as Role, name: "" }); const [nuErr, setNuErr] = useState<string | null>(null);
+  const blank = { email: "", password: "", role: (company ? "user" : "support") as Role, name: "" };
+  const [nu, setNu] = useState(blank); const [nuErr, setNuErr] = useState<string | null>(null); const [rowErr, setRowErr] = useState<string | null>(null);
   const superadmin = me.role === "superadmin";
-  const create = async () => { setNuErr(null); const r = await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(nu) }); const j = await r.json(); if (!r.ok) { setNuErr(j.error); return; } setNu({ email: "", password: "", role: "support", name: "" }); load(); };
+  const manage = superadmin || company; // company edition: its admins add, remove and reset users too
+  const create = async () => { setNuErr(null); const r = await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(nu) }); const j = await r.json(); if (!r.ok) { setNuErr(j.error); return; } setNu(blank); load(); };
   const remove = async (u: AdminUser) => { if (!confirm(`Delete ${u.email} (${u.role})? This cannot be undone.`)) return; await fetch("/api/admin/users", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id }) }); load(); };
   const load = () => fetch("/api/admin/users").then((r) => r.json()).then((j) => { setUsers(j.users ?? []); setPlans(j.plans ?? []); });
   useEffect(() => { load(); }, []);
-  const patch = async (id: string, body: Record<string, unknown>) => { await fetch("/api/admin/users", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) }); load(); };
+  const patch = async (id: string, body: Record<string, unknown>) => { setRowErr(null); const r = await fetch("/api/admin/users", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) }); if (!r.ok) setRowErr(((await r.json().catch(() => ({}))) as { error?: string }).error ?? `Error ${r.status}`); load(); };
+  const resetPassword = (u: AdminUser) => { const pw = prompt(`New temporary password for ${u.email} (at least 8 characters). Give it to the user privately; they can change it on the Account page.`); if (pw && pw.length >= 8) patch(u.id, { password: pw }); else if (pw) setRowErr("The password must be at least 8 characters"); };
   const list = users.filter((u) => !q || u.email.includes(q) || u.name.toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="card p-4 grid gap-3">
       <div className="flex items-center gap-2"><input className="input max-w-xs" placeholder="search email / name" value={q} onChange={(e) => setQ(e.target.value)} /><span className="text-xs text-muted">{users.length} users</span><button className="btn btn-sm ml-auto" onClick={load}><RefreshCw size={13} /></button></div>
-      <p className="text-xs text-muted">Set a user&apos;s plan after they pay (manual subscription management). Expiry date is optional; after it passes the user drops to Free automatically.{superadmin ? " As superadmin you can also create staff accounts (admin = full operations incl. API keys and plans; support = helpdesk: tickets, payments, user plans) and change or delete accounts." : " Role changes and account deletion are reserved for the superadmin."}</p>
-      {superadmin && (
+      {company ? <p className="text-xs text-muted">Add the people who may use CivilMate. Each active account uses one licence seat; disable an account to free its seat while keeping its history, or delete it. Admins manage users, keys and limits; users only use the assistant.</p> : <p className="text-xs text-muted">Set a user&apos;s plan after they pay (manual subscription management). Expiry date is optional; after it passes the user drops to Free automatically.{superadmin ? " As superadmin you can also create staff accounts (admin = full operations incl. API keys and plans; support = helpdesk: tickets, payments, user plans) and change or delete accounts." : " Role changes and account deletion are reserved for the superadmin."}</p>}
+      {manage && (
         <div className="border border-border rounded-lg p-3 grid sm:grid-cols-5 gap-2 items-end">
-          <div className="sm:col-span-5 label">Create account</div>
+          <div className="sm:col-span-5 label">{company ? "Add user" : "Create account"}</div>
           <input className="input" placeholder="name" value={nu.name} onChange={(e) => setNu({ ...nu, name: e.target.value })} />
           <input className="input" placeholder="email" value={nu.email} onChange={(e) => setNu({ ...nu, email: e.target.value })} />
           <input className="input" placeholder="temporary password (8+)" value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} />
-          <select className="select" value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value as Role })}><option value="support">support (helpdesk)</option><option value="admin">admin (operations)</option><option value="superadmin">superadmin</option><option value="user">user</option></select>
-          <button className="btn btn-primary" onClick={create} disabled={!nu.email || nu.password.length < 8}>Create</button>
+          {company ? <select className="select" value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value as Role })}><option value="user">user</option>{superadmin && <option value="admin">admin (manages users and keys)</option>}</select> : <select className="select" value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value as Role })}><option value="support">support (helpdesk)</option><option value="admin">admin (operations)</option><option value="superadmin">superadmin</option><option value="user">user</option></select>}
+          <button className="btn btn-primary" onClick={create} disabled={!nu.email || nu.password.length < 8}>{company ? "Add" : "Create"}</button>
           {nuErr && <div className="sm:col-span-5 text-xs text-err">{nuErr}</div>}
         </div>
       )}
+      {rowErr && <div className="text-xs text-err">{rowErr}</div>}
       <div className="overflow-x-auto"><table className="w-full text-sm">
-        <thead><tr className="text-left text-xs text-muted"><th className="py-1">User</th><th>Role</th><th>Plan</th><th>Expires</th><th>Joined</th><th>Status</th></tr></thead>
+        <thead><tr className="text-left text-xs text-muted"><th className="py-1">User</th><th>Role</th>{!company && <><th>Plan</th><th>Expires</th></>}<th>Joined</th><th>Status</th></tr></thead>
         <tbody>{list.map((u) => (
           <tr key={u.id} className="border-t border-border">
             <td className="py-1.5">{u.name || "(no name)"}<div className="text-xs text-muted">{u.email}</div></td>
             <td>{superadmin && u.id !== me.id ? <select className="select !w-auto !py-0.5" value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })}><option value="user">user</option><option value="support">support</option><option value="admin">admin</option><option value="superadmin">superadmin</option></select> : <span className="badge">{u.role}</span>}</td>
-            <td><select className="select !w-auto !py-0.5" value={u.plan} onChange={(e) => patch(u.id, { plan: e.target.value })}>{plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></td>
-            <td><input className="input !w-40 !py-0.5" type="date" value={u.planExpires ? new Date(u.planExpires).toISOString().slice(0, 10) : ""} onChange={(e) => patch(u.id, { planExpires: e.target.value ? new Date(e.target.value).getTime() : null })} /></td>
+            {!company && <><td><select className="select !w-auto !py-0.5" value={u.plan} onChange={(e) => patch(u.id, { plan: e.target.value })}>{plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></td>
+            <td><input className="input !w-40 !py-0.5" type="date" value={u.planExpires ? new Date(u.planExpires).toISOString().slice(0, 10) : ""} onChange={(e) => patch(u.id, { planExpires: e.target.value ? new Date(e.target.value).getTime() : null })} /></td></>}
             <td className="text-xs text-muted">{new Date(u.createdAt).toLocaleDateString()}</td>
-            <td className="whitespace-nowrap">{u.id !== me.id && <button className={`btn btn-sm ${u.disabled ? "text-ok" : "text-err"}`} onClick={() => patch(u.id, { disabled: u.disabled ? 0 : 1 })}>{u.disabled ? "enable" : "disable"}</button>} {superadmin && u.id !== me.id && <button className="btn btn-sm text-err" onClick={() => remove(u)}>delete</button>}</td>
+            <td className="whitespace-nowrap">{u.id !== me.id && <button className={`btn btn-sm ${u.disabled ? "text-ok" : "text-err"}`} onClick={() => patch(u.id, { disabled: u.disabled ? 0 : 1 })}>{u.disabled ? "enable" : "disable"}</button>} {manage && u.id !== me.id && (superadmin || u.role === "user") && <button className="btn btn-sm" onClick={() => resetPassword(u)}>reset password</button>} {manage && u.id !== me.id && (superadmin || u.role === "user") && <button className="btn btn-sm text-err" onClick={() => remove(u)}>delete</button>}</td>
           </tr>))}</tbody>
       </table></div>
     </div>
@@ -413,6 +426,7 @@ function SiteTabInner() {
         <h2 className="font-medium sm:col-span-2">Support & verification</h2>
         <div><label className="label">App name</label><input className="input mt-1" value={site.appName} onChange={(e) => set({ appName: e.target.value })} /></div>
         <div><label className="label">Email verification</label><select className="select mt-1" value={site.requireEmailVerification} onChange={(e) => set({ requireEmailVerification: e.target.value as SiteSettings["requireEmailVerification"] })}><option value="auto">Auto (only when email sending is configured{emailOk ? ", configured ✓" : ", not configured"})</option><option value="always">Always</option><option value="never">Never</option></select></div>
+        <div><label className="label">Civil topics only</label><select className="select mt-1" value={site.topicGuard ?? "on"} onChange={(e) => set({ topicGuard: e.target.value as SiteSettings["topicGuard"] })}><option value="on">On: refuse unrelated questions before any AI call (saves credits)</option><option value="off">Off: the AI decides</option></select><div className="text-[11px] text-muted mt-0.5">Greetings and off-topic questions are answered instantly without using a model. The CIVIL_AI_TOPIC_GUARD environment variable overrides this.</div></div>
         <div><label className="label">Support email</label><input className="input mt-1" value={site.supportEmail} onChange={(e) => set({ supportEmail: e.target.value })} placeholder="support@yourdomain.com" /></div>
         <div><label className="label">Support phone</label><input className="input mt-1" value={site.supportPhone} onChange={(e) => set({ supportPhone: e.target.value })} /></div>
         <div><label className="label">WhatsApp number</label><input className="input mt-1" value={site.whatsapp} onChange={(e) => set({ whatsapp: e.target.value })} placeholder="8801XXXXXXXXX" /></div>
@@ -572,4 +586,64 @@ function PromosTab() {
       <div className="flex gap-2 items-center"><button className="btn" onClick={add} disabled={promos.length >= 10}><Plus size={14} /> Add banner</button><button className="btn btn-primary" onClick={save}><Save size={14} /> Save banners</button>{msg && <span className="text-xs">{msg}</span>}</div>
     </div>
   );
+}
+
+interface LicenseInfo { status: string; company: string | null; seats: number; expires: string | null; daysLeft: number | null; chatAllowed: boolean; message: string | null; source: string | null }
+interface CompanySettingsUI { monthlyCredits: number; weeklyCredits: number; sessionCredits: number; models: string[]; defaultModel: string; storageMB: number }
+function CompanyTab() {
+  const [data, setData] = useState<{ settings: CompanySettingsUI; license: LicenseInfo; availableModels: string[]; activeUsers: number } | null>(null);
+  const [lic, setLic] = useState(""); const [msg, setMsg] = useState<string | null>(null); const [err, setErr] = useState<string | null>(null);
+  const load = () => fetch("/api/admin/company").then((r) => r.json()).then((j) => (j.error ? setErr(j.error) : setData(j)));
+  useEffect(() => { load(); }, []);
+  const put = async (body: Record<string, unknown>) => { setErr(null); setMsg(null); const r = await fetch("/api/admin/company", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); const j = await r.json(); if (!r.ok) { setErr(j.error); return; } setMsg("Saved."); setLic(""); load(); };
+  if (!data) return <div className="card p-4 text-sm text-muted">{err ?? "Loading…"}</div>;
+  const { settings: st, license: L } = data;
+  const set = (patch: Partial<CompanySettingsUI>) => setData({ ...data, settings: { ...st, ...patch } });
+  const allowedAll = st.models.length === 0;
+  const toggle = (m: string) => set({ models: (allowedAll ? data.availableModels : st.models).includes(m) ? (allowedAll ? data.availableModels : st.models).filter((x) => x !== m) : [...(allowedAll ? [] : st.models), m] });
+  const ok = L.status === "active" || L.status === "trial";
+  return (
+    <div className="grid gap-4">
+      <section className="card p-4 grid gap-2">
+        <h2 className="font-medium flex items-center gap-2"><Building2 size={16} /> Licence</h2>
+        <div className={`text-sm rounded-lg border px-3 py-2 ${ok ? "border-ok/40 bg-ok/10" : "border-err/40 bg-err/10"}`}>
+          <b>{L.status === "trial" ? "Evaluation" : L.status === "trial_ended" ? "Evaluation ended" : L.status === "invalid" ? "Invalid licence" : L.company}</b>
+          {" · "}{data.activeUsers} of {L.seats} seats used{L.expires ? ` · ${L.status.startsWith("trial") ? "evaluation ends" : "valid until"} ${L.expires}` : " · perpetual"}
+          {L.message && <div className="text-xs mt-1">{L.message}</div>}
+        </div>
+        {L.source === "env" ? <p className="text-xs text-muted">The licence is set by the CIVIL_AI_LICENSE environment variable on the server.</p> : (
+          <div className="grid gap-2"><textarea className="textarea font-mono text-xs min-h-16" placeholder="Paste the licence you received (starts with CM1.)" value={lic} onChange={(e) => setLic(e.target.value)} />
+            <div><button className="btn btn-primary btn-sm" disabled={!lic.trim()} onClick={() => put({ license: lic })}><Save size={13} /> Save licence</button></div></div>
+        )}
+        <p className="text-xs text-muted">The licence is checked on this server only. CivilMate receives no data from this installation.</p>
+      </section>
+      <section className="card p-4 grid gap-3">
+        <h2 className="font-medium">AI limits per user</h2>
+        <p className="text-xs text-muted">Controls spending on your AI provider accounts. 1 credit ≈ US$0.002 of provider cost; a typical engineering question uses 2 to 10 credits depending on the model. 0 = unlimited.</p>
+        <div className="grid sm:grid-cols-4 gap-3">
+          {([["monthlyCredits", "Per month"], ["weeklyCredits", "Per week"], ["sessionCredits", "Per 5-hour session"], ["storageMB", "Server backup space (MB)"]] as [keyof CompanySettingsUI, string][]).map(([k, label]) => (
+            <div key={k}><label className="label">{label}</label><input className="input mt-1" type="number" min={0} value={Number(st[k])} onChange={(e) => set({ [k]: Number(e.target.value) } as Partial<CompanySettingsUI>)} /></div>
+          ))}
+        </div>
+        <h2 className="font-medium mt-2">Models</h2>
+        {data.availableModels.length === 0 ? <p className="text-sm text-err">No AI provider is set up yet. Add your company&apos;s API key under AI provider keys, or point Ollama to a local model server.</p> : (
+          <>
+            <p className="text-xs text-muted">Models from the providers you added keys for. Untick models you do not want staff to use. The default answers first; the others are fallbacks when it is busy.</p>
+            <div className="grid sm:grid-cols-2 gap-1">{data.availableModels.map((m) => <label key={m} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={allowedAll || st.models.includes(m)} onChange={() => toggle(m)} /> {m}</label>)}</div>
+            <CustomModel onAdd={(m) => set({ models: [...new Set([...(allowedAll ? data.availableModels : st.models), m])] })} />
+            {st.models.filter((m) => !data.availableModels.includes(m)).map((m) => <label key={m} className="flex items-center gap-2 text-sm"><input type="checkbox" checked onChange={() => set({ models: st.models.filter((x) => x !== m) })} /> {m} <span className="text-xs text-muted">(own server)</span></label>)}
+            <div className="max-w-md"><label className="label">Default model</label><select className="select mt-1" value={st.defaultModel} onChange={(e) => set({ defaultModel: e.target.value })}><option value="">Automatic (first available)</option>{(allowedAll ? data.availableModels : st.models).map((m) => <option key={m} value={m}>{m}</option>)}</select></div>
+          </>
+        )}
+        <div className="flex items-center gap-3"><button className="btn btn-primary btn-sm" onClick={() => put({ settings: st })}><Save size={13} /> Save</button>{msg && <span className="text-xs text-ok">{msg}</span>}{err && <span className="text-xs text-err">{err}</span>}</div>
+      </section>
+    </div>
+  );
+}
+
+/** A model served by the company's own Ollama / vLLM server, e.g. "ollama/qwen3:32b" or a fine-tuned model. */
+function CustomModel({ onAdd }: { onAdd: (m: string) => void }) {
+  const [v, setV] = useState("");
+  const ok = /^ollama\/\S+$/.test(v.trim());
+  return <div className="flex flex-wrap items-end gap-2"><div><label className="label">Model on your own server</label><input className="input mt-1" placeholder="ollama/qwen3:32b" value={v} onChange={(e) => setV(e.target.value)} /></div><button className="btn btn-sm" disabled={!ok} onClick={() => { onAdd(v.trim()); setV(""); }}><Plus size={13} /> Add</button><span className="text-[11px] text-muted">Set the server address under AI provider keys → Ollama (any OpenAI-compatible server works).</span></div>;
 }

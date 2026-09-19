@@ -19,6 +19,13 @@ import type { Drawing as DrawingModel, Entity as DrawingEntity } from "@/lib/dra
 import { beamSection, columnSection, footingDrawing, floorPlan, beamElevation } from "@/lib/drawing/templates";
 import { toSvg } from "@/lib/drawing/svg";
 import { type Drawing, DEFAULT_LAYERS } from "@/lib/drawing/types";
+import type { WorkbookSpec } from "@/lib/docs/workbook";
+import { costEstimate, estimateWorkbook } from "@/lib/eng/estimate";
+import { projectSchedule, scheduleWorkbook } from "@/lib/eng/schedule";
+import { MIX_TOOLS } from "./mix-tools";
+import { PAVEMENT_TOOLS } from "./pavement-tools";
+import { ROAD_TOOLS } from "./road-tools";
+import { rationalMethod, kirpich, manningQ, normalDepth, sizePipe, type Section } from "@/lib/eng/drainage";
 
 export type Display =
   | { kind: "beam"; result: BeamResult }
@@ -26,17 +33,33 @@ export type Display =
   | { kind: "table"; title?: string; columns: string[]; rows: (string | number)[][] }
   | { kind: "steps"; title?: string; steps: string[]; checks?: { name: string; ok: boolean; detail: string }[] };
 
-export interface ToolOutput { result: unknown; display?: Display; summary?: string }
+/** workbook: an Excel spec the chat offers as a download (sent to the browser only, never to the model). */
+export interface ToolOutput { result: unknown; display?: Display; summary?: string; workbook?: WorkbookSpec }
 
 export interface ToolDef<S extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string;
-  category: "analysis" | "design" | "geotech" | "quantities" | "drawing" | "reference" | "utility";
+  category: "analysis" | "design" | "geotech" | "transport" | "water" | "materials" | "quantities" | "management" | "drawing" | "reference" | "utility";
   description: string;
   schema: S;
   run: (input: z.infer<S>) => ToolOutput | Promise<ToolOutput>;
 }
 
 const def = <S extends z.ZodTypeAny>(t: ToolDef<S>) => t as unknown as ToolDef;
+
+/** Plot boundary in any real-life shape (see eng/plot.ts). Edge 0 is the road (front) edge unless roadEdges says otherwise. */
+const plotCommon = { units: z.enum(["m", "ft"]).default("m").describe("units of the plot dimensions"), roadEdges: z.array(z.number().int().min(0)).optional().describe("edges facing a road (0 = first edge); corner plots have two") };
+const PLOT_SCHEMA = z.discriminatedUnion("shape", [
+  z.object({ shape: z.literal("rectangular"), width: z.number().positive().describe("along the road"), depth: z.number().positive().describe("away from the road"), ...plotCommon }),
+  z.object({ shape: z.literal("square"), side: z.number().positive(), ...plotCommon }),
+  z.object({ shape: z.literal("trapezoid"), frontWidth: z.number().positive().describe("road side"), rearWidth: z.number().positive(), depth: z.number().positive(), rearOffset: z.number().optional().describe("rear-left corner offset from front-left, default centred"), ...plotCommon }),
+  z.object({ shape: z.literal("quadrilateral"), front: z.number().positive().describe("road side"), right: z.number().positive(), rear: z.number().positive(), left: z.number().positive(), diagonal: z.number().positive().describe("front-left to rear-right corner"), ...plotCommon }).describe("irregular four-sided plot measured as four sides and one diagonal"),
+  z.object({ shape: z.literal("l_shape"), width: z.number().positive(), depth: z.number().positive(), cutWidth: z.number().positive().describe("missing corner width"), cutDepth: z.number().positive().describe("missing corner depth"), cutCorner: z.enum(["rear_right", "rear_left", "front_right", "front_left"]).default("rear_right"), ...plotCommon }),
+  z.object({ shape: z.literal("triangle"), front: z.number().positive().describe("road side"), right: z.number().positive(), left: z.number().positive(), ...plotCommon }),
+  z.object({ shape: z.literal("corner_cut"), width: z.number().positive(), depth: z.number().positive(), chamfer: z.number().positive().describe("corner splay length along each side"), corner: z.enum(["front_right", "front_left"]).default("front_right"), ...plotCommon }).describe("corner plot with a cut (splayed) corner at the road junction"),
+  z.object({ shape: z.literal("flag"), poleWidth: z.number().positive().describe("access strip width"), poleLength: z.number().positive().describe("access strip length"), flagWidth: z.number().positive(), flagDepth: z.number().positive(), pole: z.enum(["left", "right"]).default("left"), ...plotCommon }).describe("flag / panhandle lot reached by an access strip"),
+  z.object({ shape: z.literal("polygon"), points: z.array(z.tuple([z.number(), z.number()])).min(3).describe("corner coordinates x, y in order around the plot"), frontEdge: z.number().int().min(0).default(0).describe("edge facing the road (0 = first to second corner)"), ...plotCommon }).describe("custom boundary from corner coordinates"),
+  z.object({ shape: z.literal("traverse"), legs: z.array(z.object({ length: z.number().positive(), bearing: z.string().describe("e.g. N 45°30' E, S12W or azimuth 135.5") })).min(3).describe("boundary legs in order, as on a survey plan"), frontEdge: z.number().int().min(0).default(0), ...plotCommon }).describe("custom boundary from a survey traverse of lengths and bearings"),
+]);
 
 const loadSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("point"), magnitude: z.number().describe("kN, positive downward"), position: z.number().describe("m from left support") }),
@@ -284,6 +307,119 @@ export const TOOLS: ToolDef[] = [
     },
   }),
   def({
+    name: "cost_estimate",
+    category: "management",
+    description: "Cost estimate / BOQ abstract: amount = quantity × rate per item, subtotals by category, then overhead, profit, contingency, VAT and other tax. Returns a downloadable Excel workbook with live formulas. Rates must come from the user, their uploaded rate schedule or BOQ (e.g. PWD/LGED schedule of rates); never invent rates. Leave rate out for items whose rate is unknown and ask the user for it.",
+    schema: z.object({
+      project: z.string().optional(),
+      currency: z.enum(["BDT", "USD"]).default("BDT"),
+      items: z.array(z.object({
+        code: z.string().optional().describe("item code from the rate schedule, if any"),
+        description: z.string(), unit: z.string().describe("e.g. m3, cft, m2, sft, kg, ton, nos, rm, LS"), quantity: z.number(),
+        rate: z.number().optional().describe("per unit, from the user or the uploaded schedule of rates; omit if unknown"),
+        category: z.string().optional().describe("e.g. Earthwork, Concrete, Reinforcement, Masonry, Finishes, Electrical, Plumbing"),
+      })).min(1).max(2000),
+      overheadPercent: z.number().min(0).max(100).optional(), profitPercent: z.number().min(0).max(100).optional(), contingencyPercent: z.number().min(0).max(100).optional(),
+      vatPercent: z.number().min(0).max(100).optional().describe("applied on the total after overhead, profit and contingency"),
+      otherTaxPercent: z.number().min(0).max(100).optional().describe("e.g. AIT or sales tax, same base as VAT"),
+      rateSource: z.string().optional().describe("where the rates come from, e.g. 'PWD Schedule of Rates 2022' or 'contractor quotation'"),
+    }),
+    run: (inp) => {
+      const r = costEstimate(inp);
+      const f = (x: number) => x.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const extra: [string, number][] = [["Overhead", r.overhead], ["Profit", r.profit], ["Contingency", r.contingency], ["VAT", r.vat], ["Other tax", r.otherTax]];
+      const shown = r.items.slice(0, 300);
+      return {
+        result: { project: r.project, currency: r.currency, items: r.items.length, subtotal: r.subtotal, overhead: r.overhead, profit: r.profit, contingency: r.contingency, totalBeforeTax: r.beforeTax, vat: r.vat, otherTax: r.otherTax, total: r.total, byCategory: r.byCategory, missingRates: r.missingRates, rateSource: r.rateSource },
+        display: { kind: "table", title: `${r.project} (${r.currency})`, columns: ["No.", "Description", "Unit", "Qty", "Rate", "Amount", "Category"], rows: [...shown.map((it) => [it.no, it.description, it.unit, it.quantity, it.rate ?? "rate?", it.amount === null ? "-" : f(it.amount), it.category]), ...(r.items.length > shown.length ? [["", `…${r.items.length - shown.length} more items in the Excel file`, "", "", "", "", ""]] : []), ["", "Subtotal (direct cost)", "", "", "", f(r.subtotal), ""], ...extra.filter(([, v]) => v).map(([k, v]) => ["", k, "", "", "", f(v), ""]), ["", "GRAND TOTAL", "", "", "", f(r.total), ""]] },
+        workbook: estimateWorkbook(inp),
+        summary: `${r.project}: total ${r.currency} ${f(r.total)} (direct cost ${f(r.subtotal)}${r.total !== r.subtotal ? ` + markups and taxes ${f(r.total - r.subtotal)}` : ""}).${r.missingRates.length ? ` ${r.missingRates.length} item(s) have no rate: ${r.missingRates.slice(0, 5).join("; ")}.` : ""}`,
+      };
+    },
+  }),
+  def({
+    name: "project_schedule",
+    category: "management",
+    description: "Construction schedule by the critical path method: early/late start and finish, total and free float, critical path, calendar dates (Bangladesh or US weekends, holidays) and an Excel workbook with live formulas and a Gantt chart. Durations are working days from the user or their documents; do not invent them without saying they are assumptions for the user to confirm.",
+    schema: z.object({
+      project: z.string().optional(),
+      activities: z.array(z.object({
+        id: z.coerce.string().describe("short id, e.g. A, B, 1.2"), name: z.string(), duration: z.number().min(0).describe("working days; 0 = milestone"),
+        predecessors: z.array(z.coerce.string()).optional().describe('ids of preceding activities: "A" finish-to-start, "A+2" with a 2-day lag, "A SS", "A SS+3", "A FF", "A SF"'),
+        resource: z.string().optional(), cost: z.number().optional().describe("activity cost, if known"),
+      })).min(1).max(1000),
+      startDate: z.string().optional().describe("YYYY-MM-DD; gives calendar dates"),
+      weekend: z.enum(["fri", "fri_sat", "sat_sun", "none"]).default("fri").describe("weekly days off: fri = Bangladesh private sector, fri_sat = Bangladesh government, sat_sun = USA, none = 7-day week"),
+      holidays: z.array(z.string()).optional().describe("YYYY-MM-DD non-working days"),
+    }),
+    run: (inp) => {
+      const s = projectSchedule(inp);
+      const shown = s.rows.slice(0, 300);
+      return {
+        result: { project: s.project, durationWorkingDays: s.duration, startDate: s.startDate, finishDate: s.finishDate, criticalPath: s.critical, totalCost: s.totalCost, activities: s.rows.map((r) => ({ id: r.id, ES: r.ES, EF: r.EF, LS: r.LS, LF: r.LF, totalFloat: r.totalFloat, freeFloat: r.freeFloat, start: r.start, finish: r.finish })) },
+        display: { kind: "table", title: `${s.project}: ${s.duration} working days${s.finishDate ? ` (${s.startDate} to ${s.finishDate})` : ""}`, columns: ["ID", "Activity", "Days", "Predecessors", "ES", "EF", "LS", "LF", "Total float", "Free float", "Critical", ...(s.startDate ? ["Start", "Finish"] : [])], rows: shown.map((r) => [r.id, r.name, r.duration, r.predecessors.join(", ") || "-", r.ES, r.EF, r.LS, r.LF, r.totalFloat, r.freeFloat, r.critical ? "YES" : "", ...(s.startDate ? [r.start!, r.finish!] : [])]) },
+        workbook: scheduleWorkbook(inp),
+        summary: `Project duration ${s.duration} working days${s.finishDate ? ` (${s.startDate} to ${s.finishDate})` : ""}. Critical path: ${s.critical.join(" → ")}.`,
+      };
+    },
+  }),
+  def({
+    name: "stormwater_runoff",
+    category: "water",
+    description: "Peak stormwater runoff by the rational method (Q = CiA/360 SI, Q = CiA US) with composite C, storm frequency factor, and optional Kirpich time of concentration. For site drainage, subdivisions, roads and roofs. Rainfall intensity must come from the local IDF curve (USA: NOAA Atlas 14) or the user; never invent it.",
+    schema: z.object({
+      units: z.enum(["SI", "US"]).default("SI").describe("SI: ha, mm/h, m³/s; US: acres, in/h, cfs"),
+      areas: z.array(z.object({ label: z.string().optional(), area: z.number().positive().describe("ha or acres"), C: z.number().min(0.05).max(1).describe("runoff coefficient, e.g. roofs 0.95, asphalt 0.9, lawns 0.2") })).min(1),
+      intensity: z.number().positive().describe("rainfall intensity for duration = tc, mm/h or in/h"),
+      returnPeriod: z.number().int().positive().default(10).describe("design storm, years (25/50/100-yr raise C by 1.1/1.2/1.25)"),
+      flowLength: z.number().positive().optional().describe("longest flow path, m or ft (for Kirpich tc)"), slope: z.number().positive().optional().describe("average slope of the flow path, m/m"),
+    }),
+    run: (inp) => {
+      const r = rationalMethod(inp);
+      const tc = inp.flowLength && inp.slope ? kirpich(inp.flowLength, inp.slope, inp.units) : null;
+      return { result: { ...r, tcMinutes: tc?.tc }, display: { kind: "steps", title: `Rational method, ${inp.returnPeriod}-year storm`, steps: [...(tc ? [tc.step] : []), ...r.steps, ...r.notes] }, summary: `Peak runoff Q = ${r.Q.toFixed(inp.units === "US" ? 2 : 3)} ${r.unitsQ} (C = ${r.Ceff.toFixed(2)}, i = ${inp.intensity} ${r.unitsI}, A = ${r.area} ${r.unitsA})${tc ? `; Kirpich tc = ${tc.tc.toFixed(1)} min` : ""}` };
+    },
+  }),
+  def({
+    name: "pipe_channel_flow",
+    category: "water",
+    description: "Manning's equation for drains, sewers, culverts and channels: size the smallest standard pipe for a flow (storm or sanitary, with self-cleansing velocity check), or find the capacity / normal depth of a circular pipe, rectangular or trapezoidal channel. SI (m, m³/s) or US (ft, cfs).",
+    schema: z.object({
+      mode: z.enum(["size_pipe", "capacity", "normal_depth"]).default("size_pipe"),
+      units: z.enum(["SI", "US"]).default("SI"),
+      Q: z.number().positive().optional().describe("design flow, m³/s or cfs (size_pipe, normal_depth)"),
+      slope: z.number().positive().describe("bed / pipe slope, m/m (0.005 = 0.5%)"),
+      n: z.number().positive().default(0.013).describe("Manning's n: concrete pipe 0.013, PVC 0.010, earth channel 0.025–0.030"),
+      purpose: z.enum(["storm", "sanitary"]).default("storm"),
+      shape: z.enum(["circular", "rectangular", "trapezoidal"]).default("circular").describe("capacity / normal_depth"),
+      diameter: z.number().positive().optional().describe("pipe diameter, mm or in"), width: z.number().positive().optional().describe("rectangular or trapezoid bottom width, m or ft"),
+      sideSlope: z.number().min(0).optional().describe("trapezoid side slope H:1V"), depth: z.number().positive().optional().describe("flow depth for capacity, m or ft (default: full pipe)"),
+    }),
+    run: (inp) => {
+      const us = inp.units === "US";
+      if (inp.mode === "size_pipe") {
+        if (!inp.Q) throw new Error("Give the design flow Q");
+        const r = sizePipe({ Q: inp.Q, slope: inp.slope, n: inp.n, units: inp.units, purpose: inp.purpose });
+        return { result: r, display: { kind: "steps", title: `Pipe size for ${inp.Q} ${us ? "cfs" : "m³/s"} at ${(inp.slope * 100).toFixed(2)}%`, steps: r.steps, checks: r.checks }, summary: `Use Ø${r.diameter} ${r.unit} (n = ${r.n}): full capacity ${r.fullCapacity.toFixed(3)} ${us ? "cfs" : "m³/s"}, flow depth ${r.depth.toFixed(0)} ${r.unit} (${(r.depthRatio * 100).toFixed(0)}% full), velocity ${r.velocity.toFixed(2)} ${us ? "ft/s" : "m/s"}${r.checks.every((c) => c.ok) ? "" : "; velocity below the self-cleansing minimum"}` };
+      }
+      const len = (v: number) => (inp.shape === "circular" ? (us ? v / 12 : v / 1000) : v);
+      const sec: Section = inp.shape === "circular" ? { shape: "circular", diameter: len(inp.diameter ?? NaN) } : inp.shape === "rectangular" ? { shape: "rectangular", width: inp.width ?? NaN } : { shape: "trapezoidal", bottomWidth: inp.width ?? NaN, sideSlope: inp.sideSlope ?? 0 };
+      if (Object.values(sec).some((v) => typeof v === "number" && !(v >= 0))) throw new Error(inp.shape === "circular" ? "Give the pipe diameter" : "Give the channel width (and side slope for a trapezoid)");
+      const [L, q, v] = us ? ["ft", "cfs", "ft/s"] : ["m", "m³/s", "m/s"];
+      if (inp.mode === "capacity") {
+        const y = inp.depth ?? (sec.shape === "circular" ? sec.diameter : NaN);
+        if (!(y > 0)) throw new Error("Give the flow depth");
+        const r = manningQ(sec, y, inp.n, inp.slope, inp.units);
+        return { result: { ...r, depth: y }, display: { kind: "steps", title: "Manning capacity", steps: [`A = ${r.A.toFixed(4)} ${L}², P = ${r.P.toFixed(3)} ${L}, R = A/P = ${r.R.toFixed(4)} ${L}`, `V = (${us ? "1.486" : "1"}/${inp.n}) × R^(2/3) × S^(1/2) = ${r.V.toFixed(3)} ${v}`, `Q = V × A = ${r.Q.toFixed(3)} ${q}`] }, summary: `Q = ${r.Q.toFixed(3)} ${q}, V = ${r.V.toFixed(2)} ${v} at depth ${y} ${L}` };
+      }
+      if (!inp.Q) throw new Error("Give the flow Q");
+      const y = normalDepth(sec, inp.Q, inp.n, inp.slope, inp.units);
+      if (y === null) throw new Error("The section cannot carry this flow at this slope (it would surcharge); use a larger section");
+      const r = manningQ(sec, y, inp.n, inp.slope, inp.units);
+      return { result: { ...r, depth: y }, display: { kind: "steps", title: "Normal depth (Manning)", steps: [`Depth found by iteration: y = ${y.toFixed(3)} ${L}`, `A = ${r.A.toFixed(4)} ${L}², R = ${r.R.toFixed(4)} ${L}, V = ${r.V.toFixed(3)} ${v}, Q = ${r.Q.toFixed(3)} ${q}`] }, summary: `Normal depth ${y.toFixed(3)} ${L}, velocity ${r.V.toFixed(2)} ${v}` };
+    },
+  }),
+  def({
     name: "convert_units",
     category: "utility",
     description: `Convert engineering units (incl. Bangladeshi land units: katha = 720 sq ft, decimal/shotangsho = 435.6 sq ft, bigha = 20 katha; cft = ft3, sft = ft2). Categories: ${Object.entries(UNIT_CATALOG).map(([k, v]) => `${k} (${v.join(", ")})`).join("; ")}.`,
@@ -335,9 +471,9 @@ export const TOOLS: ToolDef[] = [
   def({
     name: "plan_building",
     category: "drawing",
-    description: "Building planner for architects/engineers: plot (rectangular, square or irregular polygon), road/front direction, setbacks, building type (single_family, duplex, apartment, shop_house, commercial, office), storeys, bedrooms/bathrooms, garage, shops, windows per room → automatic room programme, one floor plan per storey (DXF-exportable), NBC minimum-size checks, footprint, coverage and FAR. Units m.",
+    description: "Building planner for architects/engineers: plot of any real shape (rectangular, square, trapezoid, four sides + diagonal, L-shape, triangle, corner cut, flag lot, custom corners or survey traverse; m or ft), road/front direction, setbacks, building type (single_family, duplex, apartment, shop_house, commercial, office), storeys, bedrooms/bathrooms, garage, shops, windows per room → automatic room programme, one floor plan per storey (DXF-exportable), NBC minimum-size checks, footprint, coverage and FAR. Units m.",
     schema: z.object({
-      plot: z.object({ shape: z.enum(["rectangular", "square", "polygon"]).default("rectangular"), width: z.number().positive().optional().describe("m (x)"), depth: z.number().positive().optional().describe("m (y)"), points: z.array(z.tuple([z.number(), z.number()])).optional().describe("polygon corners in m for irregular plots") }),
+      plot: PLOT_SCHEMA,
       frontSide: z.enum(["N", "S", "E", "W"]).default("S").describe("road / entrance side"),
       setback: z.object({ front: z.number().optional(), rear: z.number().optional(), side: z.number().optional() }).optional().describe("m; defaults by plot size"),
       buildingType: z.enum(["single_family", "duplex", "apartment", "shop_house", "commercial", "office"]).default("single_family"),
@@ -349,16 +485,29 @@ export const TOOLS: ToolDef[] = [
       wallThickness: z.number().default(230).describe("mm"), corridorWidth: z.number().default(1.2).describe("m"),
       maxCoveragePercent: z.number().optional().describe("default: Dhaka 2025 limit by plot size"), maxFAR: z.number().optional().describe("default: Dhaka 2025 limit by road width"),
       roadWidth: z.number().positive().optional().describe("width of the front road, m (front setback and FAR)"),
-      standard: z.enum(["BNBC2020", "NBC2016"]).optional().describe("room-size rules: BNBC 2020 (default, Bangladesh) or NBC 2016 (India)"),
+      standard: z.enum(["BNBC2020", "NBC2016", "IRC2021"]).optional().describe("room-size rules: BNBC 2020 (default, Bangladesh), NBC 2016 (India) or IRC2021 (USA houses: no Dhaka zoning defaults; give zoning setbacks)"),
     }),
     run: (inp) => {
       const r = planBuilding(inp);
       // One drawing with all floors side by side.
       const entities: DrawingEntity[] = [];
       let offset = 0;
+      const pl = r.plot, mm = (v: number) => Math.round(v * 1000);
+      const plotW = mm(Math.max(...pl.geometry.points.map((q) => q[0])));
       for (const f of r.floors) {
-        const d = floorPlan({ rooms: f.layout.rooms, wallThickness: inp.wallThickness, title: f.floor.toUpperCase() });
-        const w = Math.max(...f.layout.rooms.map((x) => x.x + x.width)) + 3000;
+        const rooms = f.layout.rooms.map((x) => ({ ...x, x: x.x + mm(pl.offset.x), y: x.y + mm(pl.offset.y) }));
+        const d = floorPlan({ rooms, wallThickness: inp.wallThickness, title: f.floor.toUpperCase() });
+        // Property line (dash-dot), edge lengths, buildable rectangle and the road, drawn around every floor.
+        const pts = pl.geometry.points.map(([x, y]) => [mm(x), mm(y)] as [number, number]);
+        d.entities.push({ type: "polyline", points: pts, closed: true, layer: "CENTER" });
+        for (const e of pl.geometry.edges) {
+          const [x1, y1] = e.from, [x2, y2] = e.to, ang = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+          const nx = (y2 - y1) / e.length, ny = -(x2 - x1) / e.length; // outward normal
+          d.entities.push({ type: "text", x: mm((x1 + x2) / 2 + nx * 0.6), y: mm((y1 + y2) / 2 + ny * 0.6), text: `${e.length.toFixed(2)} m${e.role === "road" ? " (ROAD)" : ""}`, height: 250, rotation: ang > 90 || ang < -90 ? ang + 180 : ang, align: "center", layer: "TEXT" });
+        }
+        if (pl.buildableRect) { const b = pl.buildableRect; d.entities.push({ type: "polyline", points: [[mm(b.x), mm(b.y)], [mm(b.x + b.width), mm(b.y)], [mm(b.x + b.width), mm(b.y + b.depth)], [mm(b.x), mm(b.y + b.depth)]], closed: true, layer: "DIM" }); }
+        d.entities.push({ type: "text", x: Math.round(plotW / 2), y: -1500, text: "ROAD", height: 350, align: "center", layer: "TEXT" });
+        const w = Math.max(plotW, ...rooms.map((x) => x.x + x.width)) + 3000;
         for (const e of d.entities) entities.push(shiftEntity(e, offset));
         offset += w + 2000;
       }
@@ -376,7 +525,7 @@ export const TOOLS: ToolDef[] = [
       plotWidth: z.number().positive().describe("m, along x"), plotDepth: z.number().positive().describe("m, along y"),
       rooms: z.array(z.object({ name: z.string(), area: z.number().positive().optional().describe("m²"), width: z.number().positive().optional().describe("m"), length: z.number().positive().optional().describe("m"), kind: z.enum(["habitable", "kitchen", "bath", "wc", "store", "garage", "other"]).optional() })).min(1),
       setback: z.object({ front: z.number().default(0), rear: z.number().default(0), side: z.number().default(0) }).optional().describe("m"),
-      wallThickness: z.number().default(230).describe("mm"), corridorWidth: z.number().default(1.2).describe("m; 0 for none"), entrySide: z.enum(["S", "N", "E", "W"]).default("S"), standard: z.enum(["BNBC2020", "NBC2016"]).optional().describe("room-size rules, default BNBC 2020"),
+      wallThickness: z.number().default(230).describe("mm"), corridorWidth: z.number().default(1.2).describe("m; 0 for none"), entrySide: z.enum(["S", "N", "E", "W"]).default("S"), standard: z.enum(["BNBC2020", "NBC2016", "IRC2021"]).optional().describe("room-size rules, default BNBC 2020"),
       draw: z.boolean().default(true).describe("also return the floor-plan drawing"), title: z.string().optional(),
     }),
     run: (inp) => {
@@ -432,6 +581,8 @@ function shiftEntity(e: DrawingEntity, dx: number): DrawingEntity {
   }
 }
 
+// Calculator families kept in their own files (engine in src/lib/eng, tests in tests/).
+TOOLS.push(...ROAD_TOOLS, ...PAVEMENT_TOOLS, ...MIX_TOOLS);
 export const TOOL_MAP = new Map(TOOLS.map((t) => [t.name, t]));
 
 /** Always-available small tools. */
@@ -442,7 +593,13 @@ const TOOL_GROUPS: { keys: RegExp; tools: string[] }[] = [
   { keys: /\b(slab|floor plate|roof slab|deck)\b|স্ল্যাব|ছাদ/i, tools: ["design_one_way_slab"] },
   { keys: /\b(footing|foundation|soil|bearing|sbc|terzaghi|retaining|earth pressure|pile|settle\w*|consolidat\w*|spt|clay|sand)\b|ফাউন্ডেশন|ফুটিং|পাইল|মাটি/i, tools: ["bearing_capacity", "settlement", "earth_pressure", "design_isolated_footing", "draw_footing"] },
   { keys: /\b(steel|ismb|w-?shape|section|rolled)\b/i, tools: ["design_steel_beam", "analyze_beam"] },
-  { keys: /\b(quantit|estimat|boq|bill|cement|sand|aggregate|stone chip|khoa|bag|brick|block|masonry|plaster|paint|tile|excavat|earthwork|cut|fill|volume|rebar|rods?\b|steel weight|bar bending|bbs|material)|সিমেন্ট|বালি|খোয়া|পাথর|ইট|রড|ঢালাই|প্লাস্টার/i, tools: ["concrete_materials", "rebar_schedule", "masonry_and_finishes", "earthwork_volume"] },
+  { keys: /\b(quantit|estimat|boq|bill|cement|sand|aggregate|stone chip|khoa|bag|brick|block|masonry|plaster|paint|tile|excavat|earthwork|cut|fill|volume|rebar|rods?\b|steel weight|bar bending|bbs|material)|সিমেন্ট|বালি|খোয়া|পাথর|ইট|রড|ঢালাই|প্লাস্টার/i, tools: ["concrete_materials", "rebar_schedule", "masonry_and_finishes", "earthwork_volume", "cost_estimate"] },
+  { keys: /\b(cost|costing|budget|rate|rates|price|tender|abstract|estimate|boq|expense|taka|tk|bdt|usd|dollar)\b|খরচ|বাজেট|দাম|রেট|টাকা|প্রাক্কলন/i, tools: ["cost_estimate"] },
+  { keys: /\b(road (design|geometry|alignment|cross[- ]?section|type)|highway\w*|curve\w*|superelevation|super-elevation|camber|sight distance|ssd|isd|osd|stopping distance|chainage|pvi|pvc|pvt|crest|sag|vertical curve|horizontal curve|gradient|widening|carriageway|design speed|alignment|setting out)\b|রাস্তার নকশা|সড়কের নকশা|বাঁক/i, tools: ["horizontal_curve", "curve_radius_superelevation", "sight_distance", "vertical_curve", "road_cross_section"] },
+  { keys: /\b(pavement\w*|asphalt|bitumin\w*|carpeting|flexible pavement|rigid pavement|concrete road|esal|msa|cbr|subgrade|sub-?base|base course|aashto|rhd|lged|axle load|traffic load\w*|structural number|parking lot|driveway|road pavement|road thickness)\b|কার্পেটিং|রাস্তার পুরুত্ব/i, tools: ["pavement_flexible_aashto", "pavement_rigid_aashto", "traffic_esal", "pavement_rhd_catalogue"] },
+  { keys: /\b(mix design|mix proportion\w*|w\/c|water[- ]cement ratio|trial mix|target strength|aci 211|is 10262|design mix|concrete mix)\b|মিক্স ডিজাইন/i, tools: ["mix_design_aci", "mix_design_is10262", "concrete_materials"] },
+  { keys: /\b(drain\w*|storm ?water|runoff|rainfall|rational method|catchment|culvert|sewer\w*|pipe\w*|manning|channel|gutter|detention|flood\w*|hydraul\w*)\b|ড্রেন|নালা|পানি নিষ্কাশন|বৃষ্টি/i, tools: ["stormwater_runoff", "pipe_channel_flow"] },
+  { keys: /\b(schedule|scheduling|programme|program|gantt|cpm|pert|critical path|duration|timeline|time plan|work plan|milestone|how long)\b|সময়সূচি|কতদিন|মাস/i, tools: ["project_schedule"] },
   { keys: /\b(plan|room|layout|house|flat|apartment|villa|duplex|storey|story|stories|shop|mall|office|floor plan|bedroom|kitchen|architect|plot|setback|far|fsi|coverage|katha|bigha)\b|বাড়ি|বাড়ি|ফ্ল্যাট|নকশা|প্ল্যান|কাঠা|বিঘা|তলা/i, tools: ["plan_building", "plan_layout", "plot_stats", "draw_floor_plan", "draw_custom"] },
   { keys: /\b(draw|drawing|sketch|detail|section|elevation|dxf|cad)\b/i, tools: ["draw_custom", "draw_beam_section", "draw_column_section", "draw_footing", "draw_floor_plan"] },
 ];

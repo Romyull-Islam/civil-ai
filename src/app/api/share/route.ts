@@ -1,7 +1,7 @@
 import { getSessionUser } from "@/lib/saas/service";
 import { getDB } from "@/lib/saas/db";
 import { createShare, readShare, SHARE_DAYS } from "@/lib/saas/shares";
-import { appMode } from "@/lib/saas/mode";
+import { hasAccounts } from "@/lib/saas/mode";
 import { rateLimit } from "@/lib/saas/security";
 export const runtime = "nodejs";
 
@@ -9,12 +9,12 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const id = new URL(req.url).searchParams.get("id");
   if (id) { const r = await readShare(id); return r ? Response.json(r) : Response.json({ error: "This link has expired or was removed." }, { status: 404 }); }
-  const u = appMode() === "saas" ? await getSessionUser(req) : null;
+  const u = hasAccounts() ? await getSessionUser(req) : null;
   if (!u) return Response.json({ error: "Sign in first" }, { status: 401 });
   return Response.json({ shares: (await (await getDB()).listShares(u.id)).filter((s) => s.expiresAt > Date.now()), days: SHARE_DAYS });
 }
 export async function POST(req: Request) {
-  if (appMode() !== "saas") return Response.json({ error: "Share links are available in the online version" }, { status: 400 });
+  if (!hasAccounts()) return Response.json({ error: "Share links are available in the online version" }, { status: 400 });
   const u = await getSessionUser(req);
   if (!u) return Response.json({ error: "Sign in to create a share link" }, { status: 401 });
   if (!rateLimit(`share:${u.id}`, 30, 3600000)) return Response.json({ error: "Too many share links in the last hour" }, { status: 429 });
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   catch (e) { return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 }); }
 }
 export async function DELETE(req: Request) {
-  const u = appMode() === "saas" ? await getSessionUser(req) : null;
+  const u = hasAccounts() ? await getSessionUser(req) : null;
   if (!u) return Response.json({ error: "Sign in first" }, { status: 401 });
   const { id } = (await req.json()) as { id: string };
   await (await getDB()).deleteShare(u.id, id);

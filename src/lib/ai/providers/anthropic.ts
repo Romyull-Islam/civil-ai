@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { toolJsonSchema } from "@/lib/tools";
-import { ProviderRequest, ProviderTurn, Provider, ProviderUnavailableError, ChatMessage } from "../types";
+import { ProviderRequest, ProviderTurn, Provider, ProviderUnavailableError, ChatMessage, documentAsText } from "../types";
 
 function toAnthropicMessages(messages: ChatMessage[]): Anthropic.Beta.BetaMessageParam[] {
   const out: Anthropic.Beta.BetaMessageParam[] = [];
@@ -8,6 +8,7 @@ function toAnthropicMessages(messages: ChatMessage[]): Anthropic.Beta.BetaMessag
     if (m.role === "user") {
       const content = m.parts.flatMap<Anthropic.Beta.BetaContentBlockParam>((p) => {
         if (p.type === "text") return [{ type: "text", text: p.text } as Anthropic.Beta.BetaTextBlockParam];
+        if (p.type === "document") return [{ type: "text", text: documentAsText(p) } as Anthropic.Beta.BetaTextBlockParam];
         if (p.type === "image") return [{ type: "image", source: { type: "base64", media_type: p.mimeType as "image/png", data: p.data } } as Anthropic.Beta.BetaImageBlockParam];
         return [];
       });

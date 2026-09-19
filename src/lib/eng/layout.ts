@@ -5,6 +5,7 @@
  * per the Dhaka Mohanagar Imarat Bidhimala 2025. Units: mm internally; inputs in metres.
  */
 import type { Room } from "@/lib/drawing/templates";
+import { plotGeometry, buildableArea, type PlotInput, type PlotGeometry } from "./plot";
 
 export interface RoomRequest {
   name: string;
@@ -39,7 +40,7 @@ export interface LayoutResult {
   notes: string[];
 }
 
-export type PlanningStandard = "BNBC2020" | "NBC2016";
+export type PlanningStandard = "BNBC2020" | "NBC2016" | "IRC2021";
 type RoomMin = { area: number; width: number; label: string };
 /** Minimum room sizes. BNBC 2020 Part 3 (Bangladesh, default) and NBC 2016 Part 3 (India). */
 const ROOM_MIN: Record<PlanningStandard, Record<NonNullable<RoomRequest["kind"]>, RoomMin>> = {
@@ -59,6 +60,16 @@ const ROOM_MIN: Record<PlanningStandard, Record<NonNullable<RoomRequest["kind"]>
     wc: { area: 1.1, width: 0.9, label: "NBC 2016: WC ≥ 1.1 m², min width 0.9 m" },
     store: { area: 3.0, width: 1.5, label: "NBC 2016: store ≥ 3.0 m²" },
     garage: { area: 13.5, width: 3.0, label: "NBC 2016: garage ≥ 3.0 × 4.5 m" },
+    other: { area: 0, width: 0, label: "" },
+  },
+  // USA, one- and two-family dwellings (IRC 2018/2021/2024 R304, R307; unchanged across these editions).
+  IRC2021: {
+    habitable: { area: 6.5, width: 2.134, label: "IRC R304.1/R304.2: habitable room ≥ 70 sq ft (6.5 m²) and ≥ 7 ft (2.13 m) in any horizontal dimension" },
+    kitchen: { area: 0, width: 0, label: "IRC R304.1/R304.2: kitchens are exempt from the minimum area and dimension" },
+    bath: { area: 0, width: 0.762, label: "IRC R307.1 / Fig. R307.1: water closet space ≥ 30 in (762 mm) wide, 21 in clear in front" },
+    wc: { area: 0, width: 0.762, label: "IRC R307.1 / Fig. R307.1: water closet space ≥ 30 in (762 mm) wide, 21 in clear in front" },
+    store: { area: 0, width: 0, label: "" },
+    garage: { area: 0, width: 0, label: "" },
     other: { area: 0, width: 0, label: "" },
   },
 };
@@ -171,7 +182,7 @@ export function planLayout(inp: LayoutInput): LayoutResult {
   checks.push({ name: "Fits inside buildable area", ok: outerWidth <= buildable.width + 1e-6 && outerDepth <= buildable.depth + 1e-6, detail: `${outerWidth.toFixed(2)} × ${outerDepth.toFixed(2)} m footprint vs ${buildable.width.toFixed(2)} × ${buildable.depth.toFixed(2)} m buildable` });
   for (const r of reqs) {
     const m = roomMin(std, r.kind, r.name);
-    if (!m.area) continue;
+    if (!m.area && !m.width) continue;
     const area = r.w * r.l;
     checks.push({ name: `${r.name}: ${m.label}`, ok: area >= m.area - 1e-6 && Math.min(r.w, r.l) >= m.width - 1e-6, detail: `${r.w.toFixed(2)} × ${r.l.toFixed(2)} m = ${area.toFixed(1)} m²` });
   }
@@ -201,7 +212,7 @@ export type BuildingType = "single_family" | "duplex" | "apartment" | "shop_hous
 export type Side = "N" | "S" | "E" | "W";
 
 export interface BuildingInput {
-  plot: { shape: "rectangular" | "square" | "polygon"; width?: number; depth?: number; points?: [number, number][] }; // m
+  plot: PlotInput; // m (or ft with units: "ft"); any real-life shape, see plot.ts
   frontSide?: Side; // road / entrance side (default S)
   setback?: { front?: number; rear?: number; side?: number }; // m; defaults by plot size when omitted
   buildingType: BuildingType;
@@ -246,44 +257,52 @@ function defaultSetback(area: number, storeys = 2, roadWidth?: number) {
   return dhakaRules2025(area, storeys, roadWidth).setback;
 }
 
-/** Bounding rectangle of a polygon plot (irregular plots are planned on their largest axis-aligned box, flagged in notes). */
-function plotRect(p: BuildingInput["plot"]): { width: number; depth: number; note?: string } {
-  if (p.shape === "polygon" && p.points?.length) {
-    const xs = p.points.map((q) => q[0]), ys = p.points.map((q) => q[1]);
-    const w = Math.max(...xs) - Math.min(...xs), d = Math.max(...ys) - Math.min(...ys);
-    // shrink to ~85% to stay inside typical irregular boundaries
-    return { width: w * 0.85, depth: d * 0.85, note: `Irregular plot (${p.points.length} corners): planned on an inscribed ${(w * 0.85).toFixed(1)} × ${(d * 0.85).toFixed(1)} m rectangle, verify against the actual boundary.` };
-  }
-  if (p.shape === "square") { const s = p.width ?? p.depth ?? 10; return { width: s, depth: s }; }
-  return { width: p.width ?? 10, depth: p.depth ?? 12 };
-}
-
 /** Room programme for one dwelling unit. `part`: "all" (single storey), "ground" (living areas) or "upper" (sleeping areas). */
 function dwellingProgramme(inp: BuildingInput, part: "all" | "ground" | "upper", compact = false): RoomRequest[] {
   const beds = inp.bedrooms ?? 2, baths = inp.bathrooms ?? Math.max(1, Math.ceil(beds / 2));
   const k = compact ? 0.8 : 1;
-  const living: RoomRequest[] = [{ name: "Living", area: 20 * k, kind: "habitable" }, { name: "Kitchen", area: 8 * k, kind: "kitchen" }];
-  if (inp.dining) living.push({ name: "Dining", area: 12 * k, kind: "habitable" });
+  // Typical room sizes (not code minimums): Bangladesh practice, or US builder practice (e.g. bedroom 12×12 ft, living 16×18 ft).
+  const us = inp.standard === "IRC2021";
+  const sz = us ? { living: 27, kitchen: 14, dining: 12, master: 18, bed: 13, bath: 4.5, half: 2.3 } : { living: 20, kitchen: 8, dining: 12, master: 16, bed: 12, bath: 3.5, half: 2.0 };
+  const living: RoomRequest[] = [{ name: "Living", area: sz.living * k, kind: "habitable" }, { name: "Kitchen", area: sz.kitchen * k, kind: "kitchen" }];
+  if (inp.dining) living.push({ name: "Dining", area: sz.dining * k, kind: "habitable" });
   if (inp.store) living.push({ name: "Store", area: 3, kind: "store" });
   const sleeping: RoomRequest[] = [];
-  for (let i = 1; i <= beds; i++) sleeping.push({ name: i === 1 ? "Master bedroom" : `Bedroom ${i}`, area: (i === 1 ? 16 : 12) * k, kind: "habitable" });
+  for (let i = 1; i <= beds; i++) sleeping.push({ name: i === 1 ? (us ? "Primary bedroom" : "Master bedroom") : `Bedroom ${i}`, area: (i === 1 ? sz.master : sz.bed) * k, kind: "habitable" });
   if (inp.study) sleeping.push({ name: "Study", area: 9.5, kind: "habitable" });
-  const bathList = (n: number, offset = 0) => Array.from({ length: n }, (_, i) => ({ name: n + offset > 1 ? `Bath ${i + 1 + offset}` : "Bath", area: 3.5, kind: "bath" as const }));
+  const bathList = (n: number, offset = 0) => Array.from({ length: n }, (_, i) => ({ name: n + offset > 1 ? `Bath ${i + 1 + offset}` : "Bath", area: sz.bath, kind: "bath" as const }));
   if (part === "all") return [...living, ...sleeping, ...bathList(baths)];
-  if (part === "ground") return [...living, { name: "Guest toilet", area: 2.0, kind: "wc" }];
+  if (part === "ground") return [...living, { name: us ? "Half bath" : "Guest toilet", area: sz.half, kind: "wc" }];
   return [...sleeping, ...bathList(Math.max(1, baths - (baths > 1 ? 1 : 0)))];
 }
 
-export function planBuilding(inp: BuildingInput): { floors: FloorPlanResult[]; summary: Record<string, unknown>; checks: LayoutResult["checks"]; notes: string[] } {
-  const rect = plotRect(inp.plot);
-  const plotArea = rect.width * rect.depth;
-  const notes: string[] = [];
-  if (rect.note) notes.push(rect.note);
+export interface PlotPlacement { geometry: PlotGeometry; offset: { x: number; y: number }; buildableRect: { x: number; y: number; width: number; depth: number } | null; buildableArea: number | null }
+
+export function planBuilding(inp: BuildingInput): { floors: FloorPlanResult[]; summary: Record<string, unknown>; checks: LayoutResult["checks"]; notes: string[]; plot: PlotPlacement } {
+  const geom = plotGeometry(inp.plot);
+  const plotArea = geom.area; // true area of the actual boundary (coverage and FAR use it)
+  const notes: string[] = [...geom.notes];
   const storeys = Math.max(1, Math.min(10, Math.round(inp.storeys)));
+  // USA: setbacks, coverage and FAR come from the local zoning ordinance, never from the Dhaka rules.
+  const usa = inp.standard === "IRC2021";
   const dhaka = dhakaRules2025(plotArea, storeys, inp.roadWidth);
-  const sb = { ...defaultSetback(plotArea, storeys, inp.roadWidth), ...(inp.setback ?? {}) };
-  const maxCov = inp.maxCoveragePercent ?? dhaka.maxCoverage;
-  const maxFar = inp.maxFAR ?? dhaka.farByRoad;
+  const sb = { ...(usa ? { front: 0, rear: 0, side: 0 } : defaultSetback(plotArea, storeys, inp.roadWidth)), ...(inp.setback ?? {}) };
+  // Rectangles are planned directly with their setbacks; any other shape on the largest rectangle inside the buildable area.
+  const rectangular = inp.plot.shape === "rectangular" || inp.plot.shape === "square";
+  const W = Math.max(...geom.points.map((p) => p[0])), D = Math.max(...geom.points.map((p) => p[1]));
+  let rect = { width: W, depth: D }, layoutSetback = sb, entry = inp.frontSide ?? "S";
+  const placement: PlotPlacement = { geometry: geom, offset: { x: 0, y: 0 }, buildableRect: null, buildableArea: null };
+  if (!rectangular) {
+    const b = buildableArea(geom, { front: sb.front ?? 0, rear: sb.rear ?? 0, side: sb.side ?? 0 });
+    if (!b.rect || b.rect.width < 4 || b.rect.depth < 4) throw new Error(`After setbacks (front ${sb.front} m, rear ${sb.rear} m, side ${sb.side} m) the buildable part of this ${geom.area.toFixed(1)} m² plot is too narrow for rooms. Reduce the setbacks if your authority allows, or check the plot dimensions.`);
+    rect = { width: +b.rect.width.toFixed(2), depth: +b.rect.depth.toFixed(2) };
+    layoutSetback = { front: 0, rear: 0, side: 0 };
+    entry = "S"; // the road edge is drawn at the bottom
+    Object.assign(placement, { offset: { x: b.rect.x, y: b.rect.y }, buildableRect: b.rect, buildableArea: b.area });
+    notes.push(`Plot ${geom.shape.replace("_", " ")}: area ${geom.area.toFixed(1)} m², perimeter ${geom.perimeter.toFixed(1)} m. Buildable area after setbacks ${b.area.toFixed(1)} m²; rooms are planned on the largest rectangle inside it, ${rect.width} × ${rect.depth} m. The road edge is drawn at the bottom.`);
+  }
+  const maxCov = inp.maxCoveragePercent ?? (usa ? undefined : dhaka.maxCoverage);
+  const maxFar = inp.maxFAR ?? (usa ? undefined : dhaka.farByRoad);
   const floors: FloorPlanResult[] = [];
   const front = inp.frontSide ?? "S";
   const multi = storeys > 1;
@@ -314,18 +333,19 @@ export function planBuilding(inp: BuildingInput): { floors: FloorPlanResult[]; s
         rooms = [{ name: "Reception", area: 15, kind: "other" }, { name: "Open office", area: 40, kind: "other" }, { name: "Cabin 1", area: 12, kind: "other" }, { name: "Cabin 2", area: 12, kind: "other" }, { name: "Meeting", area: 16, kind: "other" }, { name: "Pantry", area: 6, kind: "kitchen" }, { name: "Toilets", area: 6, kind: "bath" }];
         break;
     }
-    if (ground && inp.garage) rooms.unshift({ name: "Garage", width: 3.2, length: 5.0, kind: "garage" });
+    if (ground && inp.garage) rooms.unshift(usa ? { name: "Garage (2 cars)", width: 6.1, length: 6.7, kind: "garage" } : { name: "Garage", width: 3.2, length: 5.0, kind: "garage" });
     if (multi) rooms.push({ name: "Stair", area: 6, kind: "other" });
-    const layout = planLayout({ plotWidth: rect.width, plotDepth: rect.depth, rooms, setback: sb, wallThickness: inp.wallThickness, corridorWidth: inp.corridorWidth, entrySide: front, standard: inp.standard });
+    const layout = planLayout({ plotWidth: rect.width, plotDepth: rect.depth, rooms, setback: layoutSetback, wallThickness: inp.wallThickness, corridorWidth: inp.corridorWidth, entrySide: entry, standard: inp.standard });
     if ((inp.windowsPerRoom ?? 1) === 2) for (const r of layout.rooms) if (!r.open && r.windows?.length) r.windows = [...r.windows, r.windows[0] === "S" || r.windows[0] === "N" ? "E" : "N"];
     floors.push({ floor: label, layout, rooms });
   }
   const footprint = Math.max(...floors.map((f) => f.layout.builtUpArea));
   const stats = plotStats(plotArea, storeys, footprint, maxCov, maxFar);
   const checks: LayoutResult["checks"] = floors.flatMap((f) => f.layout.checks.map((c) => ({ ...c, name: `${f.floor}: ${c.name}` })));
-  checks.push({ name: "Ground coverage limit", ok: !!stats.coverageOk, detail: `${stats.coveragePercent.toFixed(1)}% vs ${maxCov}% allowed${inp.maxCoveragePercent === undefined ? " (Dhaka 2025 Table 3 by plot size)" : ""}` });
+  if (usa && !inp.setback) checks.push({ name: "Zoning setbacks", ok: false, detail: "No setbacks given. In the USA, setbacks, lot coverage and height limits come from the local zoning ordinance: enter the front, rear and side setbacks (and any coverage limit) for this lot." });
+  if (maxCov !== undefined) checks.push({ name: "Ground coverage limit", ok: !!stats.coverageOk, detail: `${stats.coveragePercent.toFixed(1)}% vs ${maxCov}% allowed${inp.maxCoveragePercent === undefined ? " (Dhaka 2025 Table 3 by plot size)" : ""}` });
   if (maxFar !== undefined) checks.push({ name: "FAR limit", ok: !!stats.farOk, detail: `${stats.far.toFixed(2)} vs ${maxFar} allowed${inp.maxFAR === undefined ? ` (Dhaka 2025 Table 5 for a ${inp.roadWidth} m road; the DAP area FAR may be lower)` : ""}` });
-  notes.push(`Setbacks used: front ${sb.front} m, rear ${sb.rear} m, side ${sb.side} m (${inp.setback ? "as given" : `Dhaka Mohanagar Imarat Bidhimala 2025 for ${storeys} storeys${inp.roadWidth === undefined ? "; give the road width for the exact front setback and FAR" : ""}`}). Front/road side: ${front}. Outside Dhaka, the local development authority's rules apply.`);
+  notes.push(usa ? `Setbacks used: front ${sb.front} m, rear ${sb.rear} m, side ${sb.side} m (${inp.setback ? "as given" : "none given: enter the zoning setbacks"}). Room sizes checked against IRC R304 and R307; room areas are typical US practice, not code minimums.` : `Setbacks used: front ${sb.front} m, rear ${sb.rear} m, side ${sb.side} m (${inp.setback ? "as given" : `Dhaka Mohanagar Imarat Bidhimala 2025 for ${storeys} storeys${inp.roadWidth === undefined ? "; give the road width for the exact front setback and FAR" : ""}`}). Front/road side: ${front}. Outside Dhaka, the local development authority's rules apply.`);
   notes.push(...floors[0].layout.notes.filter((n) => !/^Plot/.test(n)));
-  return { floors, summary: { plotArea, footprint, storeys, builtUp: stats.builtUp, coveragePercent: stats.coveragePercent, far: stats.far, carpetPerFloor: floors.map((f) => ({ floor: f.floor, carpet: f.layout.carpetArea, rooms: f.layout.rooms.filter((r) => !r.open).length })) }, checks, notes };
+  return { plot: placement, floors, summary: { plotArea, plotPerimeter: geom.perimeter, buildableArea: placement.buildableArea ?? undefined, footprint, storeys, builtUp: stats.builtUp, coveragePercent: stats.coveragePercent, far: stats.far, carpetPerFloor: floors.map((f) => ({ floor: f.floor, carpet: f.layout.carpetArea, rooms: f.layout.rooms.filter((r) => !r.open).length })) }, checks, notes };
 }

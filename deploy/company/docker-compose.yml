@@ -1,0 +1,30 @@
+# CivilMate company edition: runs entirely on the company's own server or PC.
+#   1. cp company.env.example company.env   and fill in CIVIL_AI_SECRET (and optionally keys / the licence)
+#   2. docker compose up -d                  (add  --profile local-ai  to also run a private Ollama model server)
+#   3. open http://<server-ip>:3000 and create the administrator account
+# Data (accounts, settings, encrypted API keys, server backups) lives in the "civilmate-data" volume on this machine.
+services:
+  civilmate:
+    image: civilmate/company:${CIVILMATE_VERSION:-latest}
+    build: { context: ../.., dockerfile: Dockerfile }
+    restart: unless-stopped
+    env_file: company.env
+    environment:
+      CIVIL_AI_MODE: company
+      CIVIL_AI_USER_DATA: /data
+      DATABASE_PATH: /data/civilmate.sqlite
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports: ["3000:3000"]
+    volumes: ["civilmate-data:/data"]
+
+  # Optional private model server (no data leaves the building). GPU: uncomment the deploy block (NVIDIA Container Toolkit).
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-ai"]
+    restart: unless-stopped
+    volumes: ["ollama-models:/root/.ollama"]
+    # deploy: { resources: { reservations: { devices: [{ driver: nvidia, count: all, capabilities: [gpu] }] } } }
+
+volumes:
+  civilmate-data:
+  ollama-models:

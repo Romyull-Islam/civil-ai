@@ -375,7 +375,13 @@ describe("building planner", () => {
   it("shop-house: shops on ground, dwelling above; irregular polygon plot handled", () => {
     const r = planBuilding({ plot: { shape: "polygon", points: [[0, 0], [14, 0], [13, 11], [1, 12]] }, buildingType: "shop_house", storeys: 2, shops: 3, bedrooms: 2 });
     expect(r.floors[0].layout.rooms.filter((x) => /Shop/.test(x.name)).length).toBe(3);
-    expect(r.notes.some((n) => /Irregular/.test(n))).toBe(true);
+    expect((r.summary as { plotArea: number }).plotArea).toBeCloseTo(149.5, 6); // true (shoelace) area, not a bounding box
+    // Every room lies inside the actual boundary.
+    const poly = r.plot.geometry.points, inside = ([x, y]: [number, number]) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; };
+    for (const f of r.floors) for (const room of f.layout.rooms) {
+      const x0 = room.x / 1000 + r.plot.offset.x, y0 = room.y / 1000 + r.plot.offset.y, x1 = x0 + room.width / 1000, y1 = y0 + room.length / 1000;
+      for (const c of [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] as [number, number][]) expect(inside(c), `${f.floor} ${room.name}`).toBe(true);
+    }
   });
 });
 

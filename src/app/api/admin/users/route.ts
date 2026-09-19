@@ -3,6 +3,8 @@ import { getDB, ROLES, type Role } from "@/lib/saas/db";
 import { publicUser, getPlans, createAccount } from "@/lib/saas/service";
 import { hashPassword } from "@/lib/saas/crypto";
 import { audit } from "@/lib/saas/security";
+import { isCompany } from "@/lib/saas/mode";
+import { assertSeatAvailable } from "@/lib/company/license";
 export const runtime = "nodejs";
 
 export const GET = guardArea("users", async () => { const db = await getDB(); return Response.json({ users: (await db.listUsers()).map(publicUser), plans: await getPlans(), roles: ROLES }); });
@@ -20,6 +22,7 @@ export const PATCH = guardArea("users", async (req, actor) => {
   }
   if (target.role === "superadmin" && actor.role !== "superadmin") return Response.json({ error: "Only a superadmin can modify a superadmin" }, { status: 403 });
   if (disabled && target.id === actor.id) return Response.json({ error: "You cannot disable yourself" }, { status: 400 });
+  if (isCompany() && disabled === 0 && target.disabled) { try { await assertSeatAvailable(); } catch (e) { return Response.json({ error: (e as Error).message }, { status: 400 }); } }
   await db.updateUser(id, { plan, role, planExpires, disabled, passwordHash: password ? hashPassword(password) : undefined });
   await audit(actor.id, "user.update", target.email, JSON.stringify({ plan, role, planExpires, disabled, password: password ? "changed" : undefined }));
   const u = await db.getUserById(id);
@@ -27,13 +30,13 @@ export const PATCH = guardArea("users", async (req, actor) => {
 });
 
 /** Superadmin: create a staff/user account with a temporary password (emailed when email is configured). */
-const guardActor = (req: Request) => import("@/lib/saas/service").then((m) => m.getSessionUser(req)).then((u) => u!);
-export const POST = guardArea("accounts", async (req) => {
+export const POST = guardArea("accounts", async (req, actor) => {
   try {
     const { email, password, role, name } = (await req.json()) as { email: string; password: string; role: Role; name?: string };
     if (!ROLES.includes(role)) return Response.json({ error: "Invalid role" }, { status: 400 });
+    if (actor.role !== "superadmin" && role !== "user") return Response.json({ error: "Only the owner (superadmin) can create staff accounts" }, { status: 403 });
     const u = await createAccount(email, password, role, name);
-    await audit((await guardActor(req)).id, "user.create", u.email, role);
+    await audit(actor.id, "user.create", u.email, role);
     return Response.json({ user: publicUser(u) }, { status: 201 });
   } catch (e) { return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 }); }
 });
@@ -45,6 +48,7 @@ export const DELETE = guardArea("accounts", async (req, actor) => {
   const db = await getDB();
   const target = await db.getUserById(id);
   if (!target) return Response.json({ error: "Not found" }, { status: 404 });
+  if (actor.role !== "superadmin" && target.role !== "user") return Response.json({ error: "Only the owner (superadmin) can delete staff accounts" }, { status: 403 });
   await db.deleteUser(id);
   await audit(actor.id, "user.delete", target.email, target.role);
   return Response.json({ ok: true });

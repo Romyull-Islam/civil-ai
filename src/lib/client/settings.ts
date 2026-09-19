@@ -6,7 +6,7 @@ export interface AppSettings {
   provider: string; // "auto" or provider id
   model?: string;
   keys: KeyBag;
-  preferences: { designCode?: string; units?: "SI" | "imperial"; region?: string; name?: string };
+  preferences: { country?: "BD" | "US" | "other"; designCode?: string; units?: "SI" | "imperial"; region?: string; name?: string };
   theme: "dark" | "light" | "system";
   /** delete conversations not opened for this many days (0 = keep forever) */
   autoDeleteDays: number;
@@ -15,7 +15,16 @@ export interface AppSettings {
 }
 
 const KEY = "civil-ai.settings.v1";
-export const DEFAULT_SETTINGS: AppSettings = { provider: typeof window !== "undefined" && (window as unknown as { civilAI?: { desktop?: boolean } }).civilAI?.desktop ? "local-first" : "auto", keys: {}, preferences: { designCode: "BNBC 2020 (Bangladesh)", units: "SI", region: "Bangladesh" }, theme: "dark", autoDeleteDays: 30, autoBackup: false };
+/** Country presets: design code, units and region label set together (the user can still change each one). */
+export const COUNTRY_PRESETS = {
+  BD: { country: "BD", designCode: "BNBC 2020 (Bangladesh)", units: "SI", region: "Bangladesh" },
+  US: { country: "US", designCode: "ACI 318 / AISC 360 (USA)", units: "imperial", region: "United States" },
+} as const;
+/** First visit: guess the country from the browser time zone (America/* → USA, otherwise Bangladesh). */
+function guessCountry(): "BD" | "US" {
+  try { return /^America\/|^US\/|^Pacific\/Honolulu/.test(Intl.DateTimeFormat().resolvedOptions().timeZone) ? "US" : "BD"; } catch { return "BD"; }
+}
+export const DEFAULT_SETTINGS: AppSettings = { provider: typeof window !== "undefined" && (window as unknown as { civilAI?: { desktop?: boolean } }).civilAI?.desktop ? "local-first" : "auto", keys: {}, preferences: { ...COUNTRY_PRESETS[typeof window === "undefined" ? "BD" : guessCountry()] }, theme: "dark", autoDeleteDays: 30, autoBackup: false };
 
 let cache: AppSettings | null = null;
 

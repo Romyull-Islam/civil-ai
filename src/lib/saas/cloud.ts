@@ -34,7 +34,7 @@ export async function cloudMe(link: CloudLink) {
 
 /** May this installation run the built-in local model? byok: always. desktop: linked plan with localAI (cached ≤ 14 days) or CIVIL_AI_LOCAL_AI_FREE=1. */
 export async function localAIAllowed(mode: string): Promise<{ allowed: boolean; reason?: string }> {
-  if (mode === "byok" || process.env.CIVIL_AI_LOCAL_AI_FREE === "1") return { allowed: true };
+  if (mode === "byok" || mode === "company" || process.env.CIVIL_AI_LOCAL_AI_FREE === "1") return { allowed: true };
   const link = await getCloudLink();
   if (!link) return { allowed: false, reason: "Sign in to your CivilMate account (Settings → cloud account). The offline model is included in Pro and Business plans." };
   if (link.checkedAt && Date.now() - link.checkedAt > 14 * 86400000) { try { await cloudMe(link); } catch { /* offline: keep cached */ } }

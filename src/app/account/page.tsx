@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import { LogOut, User, ShieldCheck } from "lucide-react";
 import { useEffect } from "react";
-import { useSession, logoutClient } from "@/lib/client/session";
+import { useSession, logoutClient, accountsMode } from "@/lib/client/session";
 
 // eslint-disable-next-line @next/next/no-img-element
 const Avatar = ({ src }: { src: string }) => <img src={src} alt="" className="w-8 h-8 rounded-full" />;
@@ -20,7 +20,7 @@ export default function AccountPage() {
   const stopShare = async (id: string) => { await fetch("/api/share", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }); setShares((l) => l.filter((x) => x.id !== id)); };
   const outcome = useSyncExternalStore(() => () => {}, () => new URLSearchParams(window.location.search).get("payment"), () => null);
   if (!s) return <div className="p-6 text-sm text-muted">Loading…</div>;
-  if (s.mode !== "saas") return <div className="p-6 text-sm text-muted">Accounts are not used in this deployment.</div>;
+  if (!accountsMode(s)) return <div className="p-6 text-sm text-muted">Accounts are not used in this deployment.</div>;
   if (!s.user) return <div className="p-6 text-sm">Please <Link className="text-accent2" href="/login">sign in</Link>.</div>;
   return (
     <div className="h-full overflow-y-auto"><div className="max-w-2xl mx-auto p-6 grid gap-4">

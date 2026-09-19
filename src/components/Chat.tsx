@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
-import { Send, Square, Trash2, ImagePlus, X, CloudUpload, Share2 } from "lucide-react";
+import { Send, Square, Trash2, Paperclip, X, CloudUpload, Share2, FileText, Loader2, AlertTriangle } from "lucide-react";
 import { ShareDialog } from "./ShareDialog";
 import { PromoBanner } from "./PromoBanner";
 import { LogoMark } from "./Logo";
@@ -15,7 +15,7 @@ import { ToolCard } from "./ToolCard";
 import { PROVIDERS } from "@/lib/ai/registry";
 import { LocalAI } from "./LocalAI";
 import { ModelPicker } from "./ModelPicker";
-import { useSession, refreshSession } from "@/lib/client/session";
+import { useSession, refreshSession, accountsMode } from "@/lib/client/session";
 
 const SUGGESTIONS = [
   "Design a 10\"×18\" (250×450 mm) RC beam, 16 ft span, 1.2 kip/ft factored load, 3000 psi concrete and Grade 60 steel per BNBC 2020, then draw the section.",
@@ -45,6 +45,9 @@ export function Chat() {
   const [conv, setConv] = useState<Conversation | null>(null);
   const [input, setInput] = useState("");
   const [images, setImages] = useState<{ mimeType: string; data: string; name: string }[]>([]);
+  const [docs, setDocs] = useState<{ name: string; kind: string; text: string; pages?: number; truncated?: boolean; warning?: string }[]>([]);
+  const [uploading, setUploading] = useState<string[]>([]);
+  const [attachErr, setAttachErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string>("");
   const abortRef = useRef<AbortController | null>(null);
@@ -83,27 +86,44 @@ export function Chat() {
 
   const deleteConversation = async (id: string) => { await db.conversations.delete(id); if (conv?.id === id) setConv(null); refreshList(); };
 
-  const addImages = async (files: FileList | null) => {
+  /** Images go to the model as pictures; PDF / Word / Excel / CSV / text files are read on the server and sent as text. */
+  const addFiles = async (files: FileList | null) => {
     if (!files) return;
+    setAttachErr(null);
     const arr: typeof images = [];
-    for (const f of Array.from(files).slice(0, 4)) {
-      if (!f.type.startsWith("image/")) continue;
-      const data = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res((r.result as string).split(",")[1]); r.readAsDataURL(f); });
-      arr.push({ mimeType: f.type, data, name: f.name });
+    for (const f of Array.from(files).slice(0, 6)) {
+      if (f.type.startsWith("image/")) {
+        const data = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res((r.result as string).split(",")[1]); r.readAsDataURL(f); });
+        arr.push({ mimeType: f.type, data, name: f.name });
+        continue;
+      }
+      setUploading((u) => [...u, f.name]);
+      try {
+        const fd = new FormData(); fd.append("file", f);
+        const r = await fetch("/api/extract", { method: "POST", body: fd });
+        const j = await r.json();
+        if (!r.ok) setAttachErr(`${f.name}: ${j.error}`);
+        else setDocs((d) => [...d, j.document].slice(0, 3));
+      } catch { setAttachErr(`${f.name}: upload failed`); }
+      setUploading((u) => u.filter((n) => n !== f.name));
     }
-    setImages((prev) => [...prev, ...arr].slice(0, 4));
+    if (arr.length) setImages((prev) => [...prev, ...arr].slice(0, 4));
   };
 
   const send = async (text?: string) => {
     const content = (text ?? input).trim();
-    if (!content && !images.length) return;
-    if (!settings || busy) return;
-    const parts: ContentPart[] = [...images.map((im) => ({ type: "image" as const, mimeType: im.mimeType, data: im.data })), { type: "text" as const, text: content || "Describe this image." }];
+    if (!content && !images.length && !docs.length) return;
+    if (!settings || busy || uploading.length) return;
+    const parts: ContentPart[] = [
+      ...docs.map((d) => ({ type: "document" as const, name: d.name, kind: d.kind, text: d.text, pages: d.pages, truncated: d.truncated })),
+      ...images.map((im) => ({ type: "image" as const, mimeType: im.mimeType, data: im.data })),
+      { type: "text" as const, text: content || (docs.length ? "Summarise the attached document and list the design data it gives (soil parameters, loads, dimensions, quantities)." : "Describe this image.") },
+    ];
     const userMsg: UIMessage = { id: uid(), role: "user", parts, createdAt: now() };
     const base: Conversation = conv ?? { id: uid(), title: titleFrom(content), createdAt: now(), updatedAt: now(), messages: [] };
     const assistant: UIMessage = { id: uid(), role: "assistant", parts: [], createdAt: now(), toolOutputs: {}, meta: { notices: [] } };
     let current: Conversation = { ...base, updatedAt: now(), messages: [...base.messages, userMsg, assistant] };
-    setConv(current); setInput(""); setImages([]); setBusy(true); setStatus("Connecting…");
+    setConv(current); setInput(""); setImages([]); setDocs([]); setAttachErr(null); setBusy(true); setStatus("Connecting…");
     const ctrl = new AbortController(); abortRef.current = ctrl;
     const history = toWire(current.messages.slice(0, -1));
     // pending tool calls are appended as parts on the assistant message; tool results go to a following "tool" message (wire only)
@@ -129,10 +149,10 @@ export function Chat() {
       if ((e as Error).name !== "AbortError") update((a) => ({ ...a, meta: { ...a.meta, error: (e as Error).message } }));
     } finally {
       setBusy(false); setStatus(""); abortRef.current = null;
-      if (session?.mode === "saas") refreshSession().catch(() => {});
+      if (accountsMode(session)) refreshSession().catch(() => {});
       void textBuf;
       await persist(current);
-      if (session?.mode === "saas" && settings.autoBackup && (session.cloudQuota?.limitBytes ?? 0) > 0) backup(current, true).catch(() => {});
+      if (accountsMode(session) && settings.autoBackup && (session?.cloudQuota?.limitBytes ?? 0) > 0) backup(current, true).catch(() => {});
     }
   };
 
@@ -145,7 +165,7 @@ export function Chat() {
           <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
             <div className="font-medium text-sm truncate flex-1" title={conv.title}>{conv.title}</div>
             {backupMsg && <span className="text-xs text-ok">{backupMsg}</span>}
-            {session?.mode === "saas" && (session.cloudQuota?.limitBytes ?? 0) > 0 && <button className="btn btn-sm" onClick={() => backup(conv)} title="Back up this chat to my account"><CloudUpload size={14} /> <span className="hidden sm:inline">Back up</span></button>}
+            {accountsMode(session) && (session?.cloudQuota?.limitBytes ?? 0) > 0 && <button className="btn btn-sm" onClick={() => backup(conv)} title="Back up this chat to my account"><CloudUpload size={14} /> <span className="hidden sm:inline">Back up</span></button>}
             <button className="btn btn-sm" onClick={() => setShareOpen(true)} title="Share or download this chat"><Share2 size={14} /> <span className="hidden sm:inline">Share</span></button>
             <button className="btn btn-sm" onClick={() => { if (confirm("Delete this conversation?")) deleteConversation(conv.id); }} title="Delete this chat"><Trash2 size={14} /></button>
           </div>
@@ -163,7 +183,7 @@ export function Chat() {
                   {session?.mode === "byok" && <p className="text-xs text-muted mt-2">No key yet? Open Settings and add a free Gemini or Groq key, or run Ollama locally.</p>}
                   {session?.mode === "desktop" && <p className="text-xs text-muted mt-2">Works offline with the built-in model. Link your CivilMate account in Settings for stronger cloud models.</p>}
                 </div>
-                {session?.mode !== "saas" && <LocalAI compact />}
+                {!accountsMode(session) && <LocalAI compact />}
                 <div className="grid sm:grid-cols-2 gap-2">
                   {SUGGESTIONS.map((s) => <button key={s} className="card text-left p-3 text-sm hover:border-accent2 transition" onClick={() => send(s)}>{s}</button>)}
                 </div>
@@ -177,6 +197,21 @@ export function Chat() {
         <div className="border-t border-border bg-bg/80 backdrop-blur">
           <div className="max-w-4xl mx-auto px-4 pt-3 pb-5 grid gap-2">
             {session?.mode === "saas" && !busy && <PromoBanner placement="chat" />}
+            {(docs.length > 0 || uploading.length > 0 || attachErr) && (
+              <div className="flex gap-2 flex-wrap text-xs">
+                {docs.map((d, i) => (
+                  <div key={i} className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 bg-elev ${d.warning ? "border-accent/60" : "border-border"}`} title={d.warning ?? `${d.text.length.toLocaleString()} characters will be sent to the AI`}>
+                    {d.warning ? <AlertTriangle size={14} className="text-accent" /> : <FileText size={14} className="text-accent2" />}
+                    <span className="max-w-48 truncate">{d.name}</span>
+                    <span className="text-muted">{d.kind.toUpperCase()}{d.pages ? ` · ${d.pages} p` : ""}{d.truncated ? " · shortened" : ""}</span>
+                    <button onClick={() => setDocs(docs.filter((_, j) => j !== i))} aria-label="Remove document"><X size={12} /></button>
+                  </div>
+                ))}
+                {uploading.map((n) => <div key={n} className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-muted"><Loader2 size={14} className="animate-spin" /> Reading {n}…</div>)}
+                {attachErr && <div className="text-err self-center">{attachErr}</div>}
+                {docs.some((d) => d.warning) && <div className="w-full text-muted">{docs.find((d) => d.warning)!.warning}</div>}
+              </div>
+            )}
             {images.length > 0 && (
               <div className="flex gap-2 flex-wrap">
                 {images.map((im, i) => (
@@ -196,13 +231,13 @@ export function Chat() {
                 rows={2}
                 onChange={(e) => { setInput(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(240, e.target.scrollHeight) + "px"; }}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                onPaste={(e) => { if (e.clipboardData.files.length) addImages(e.clipboardData.files); }}
+                onPaste={(e) => { if (e.clipboardData.files.length) addFiles(e.clipboardData.files); }}
               />
               <div className="flex items-center gap-2 px-2 pb-2">
-                <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => addImages(e.target.files)} />
-                <button className="btn btn-sm" onClick={() => fileRef.current?.click()} title="Attach a site photo or drawing image"><ImagePlus size={16} /> <span className="hidden sm:inline">Image</span></button>
+                <input ref={fileRef} type="file" accept="image/*,.pdf,.docx,.xlsx,.csv,.txt,.md" multiple hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+                <button className="btn btn-sm" onClick={() => fileRef.current?.click()} title="Attach site photos, drawings, soil reports, proposals, BOQs or rate schedules (images, PDF, Word, Excel, CSV)"><Paperclip size={16} /> <span className="hidden sm:inline">Attach</span></button>
                 <div className="flex-1 min-w-0 flex items-center gap-3"><ModelPicker /><span className="text-[11px] text-muted hidden md:inline">Code: {settings?.preferences.designCode}</span></div>
-                {busy ? <button className="btn" onClick={stop} title="Stop"><Square size={16} /> Stop</button> : <button className="btn btn-primary rounded-xl px-4 py-2" onClick={() => send()} disabled={!input.trim() && !images.length} title="Send (Enter)"><Send size={16} /> <span className="hidden sm:inline">Send</span></button>}
+                {busy ? <button className="btn" onClick={stop} title="Stop"><Square size={16} /> Stop</button> : <button className="btn btn-primary rounded-xl px-4 py-2" onClick={() => send()} disabled={(!input.trim() && !images.length && !docs.length) || uploading.length > 0} title="Send (Enter)"><Send size={16} /> <span className="hidden sm:inline">Send</span></button>}
               </div>
             </div>
             <div className="text-[11px] text-muted text-center">Enter to send · Shift+Enter for a new line · results are preliminary and must be checked by a licensed engineer</div>
@@ -223,6 +258,7 @@ function MessageView({ m }: { m: UIMessage }) {
           if (p.type === "text") return isUser ? <div key={i} className="whitespace-pre-wrap text-sm">{p.text}</div> : <Markdown key={i} text={p.text} />;
           // eslint-disable-next-line @next/next/no-img-element
           if (p.type === "image") return <img key={i} src={`data:${p.mimeType};base64,${p.data}`} alt="attachment" className="max-h-56 rounded-lg border border-border mb-2" />;
+          if (p.type === "document") return <div key={i} className="flex items-center gap-2 text-xs rounded-lg border border-border bg-elev px-2.5 py-1.5 mb-2 w-fit"><FileText size={14} className="text-accent2" /><span className="max-w-64 truncate">{p.name}</span><span className="text-muted">{p.kind.toUpperCase()}{p.pages ? ` · ${p.pages} pages` : ""}</span></div>;
           if (p.type === "tool_call") return <ToolCard key={i} name={p.name} args={p.args} output={m.toolOutputs?.[p.id]} pending={!m.toolOutputs?.[p.id]} />;
           return null;
         })}

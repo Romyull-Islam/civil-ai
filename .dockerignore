@@ -5,3 +5,4 @@ desktop/app
 desktop/release
 docs
 *.md
+*.pem

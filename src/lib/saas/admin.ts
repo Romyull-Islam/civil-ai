@@ -1,5 +1,5 @@
 import { getSessionUser } from "./service";
-import { appMode } from "./mode";
+import { hasAccounts, isCompany } from "./mode";
 import type { Role, User } from "./db";
 
 /** Which roles may use which admin area. */
@@ -15,10 +15,12 @@ export const AREA_ROLES: Record<string, Role[]> = {
 };
 
 export async function requireRole(req: Request, roles: Role[]): Promise<User> {
-  if (appMode() !== "saas") throw new Response(JSON.stringify({ error: "Not in SaaS mode" }), { status: 400 });
+  if (!hasAccounts()) throw new Response(JSON.stringify({ error: "Not in SaaS mode" }), { status: 400 });
   const u = await getSessionUser(req);
   if (!u) throw new Response(JSON.stringify({ error: "Sign in required" }), { status: 401 });
-  if (!roles.includes(u.role)) throw new Response(JSON.stringify({ error: `Requires role: ${roles.join(" or ")}` }), { status: 403 });
+  // Company edition: the company's admins also add and remove accounts (the hosted service keeps that to the superadmin).
+  const effective = isCompany() && u.role === "admin" && roles.includes("superadmin") && !roles.includes("admin") && roles.length === 1 ? [...roles, "admin" as Role] : roles;
+  if (!effective.includes(u.role)) throw new Response(JSON.stringify({ error: `Requires role: ${roles.join(" or ")}` }), { status: 403 });
   return u;
 }
 export const requireAdmin = (req: Request) => requireRole(req, ["superadmin", "admin"]);

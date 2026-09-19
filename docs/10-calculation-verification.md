@@ -202,6 +202,99 @@ The Indian NBC 2016 room sizes are available as an option.
 - Maximum ground coverage by plot size (Table 3).
 - FAR by road width (Table 5). This is an upper bound: the DAP area FAR may be lower and must be checked.
 
+**Plot shapes (`plot.ts`)**
+- **Shapes:** rectangle, square, trapezoid, four sides plus one diagonal (surveyor's measurement), L-shape, triangle, corner cut, flag lot, corner coordinates, or a traverse of lengths and bearings.
+- **Traverses:** the misclosure is reported and corrected by the compass (Bowditch) rule.
+- **Areas:** exact (shoelace formula). Coverage and FAR now use this true area. Previously irregular plots used 85% of the bounding box, which was wrong.
+- **Setbacks:** applied per edge. Road edges get the front setback, edges facing away from the road get the rear setback, and all others the side setback.
+- **Buildable area:** found on a grid of about 1/400 of the plot size, so it is conservative by at most one cell. Rooms are planned on the largest rectangle inside it.
+- **Tests:** hand-computed areas for every shape, closure precision, bearings, feet, and a check that every room lies inside the real boundary.
+
+**US houses (`standard: "IRC2021"`)**
+- **Room sizes:** habitable rooms at least 70 sq ft and 7 ft in every direction (R304.1, R304.2); kitchens are exempt. Water-closet space at least 30 in wide with 21 in clear in front (R307.1). These are unchanged in the IRC 2018, 2021 and 2024.
+- **Programme:** room areas follow typical US practice and are not code minimums.
+- **Zoning:** no zoning values are assumed. Setbacks, coverage and height come from the local ordinance, and the planner flags them when they are missing.
+
+### Roads: `roadgeo.ts` (42 tests)
+
+**Standards covered**
+- **AASHTO**, metric and US units.
+- **RHD** Geometric Design Standards (2000 draft): Tables 2.1–2.3, 5.1–5.4 and 6.1–6.3, all read from the PDF.
+- **LGED** Rural Roads (2005).
+- **IRC** forms, which Bangladesh practice often borrows.
+
+**What is calculated**
+- **Radius and superelevation:** R = V²/127(e + f).
+  - The AASHTO minimum-radius tables are reproduced by rounding to the **nearest** metre (NYSDOT M2-13/14; TxDOT for US units).
+  - Required e uses AASHTO Method 5 with running speeds, and matches NYSDOT and TxDOT within 0.1%.
+- **Stopping sight distance:** 0.278Vt + 0.039V²/a, with grade correction.
+- **Crest and sag curves:** both the S < L and S ≥ L cases, always picking the valid one. A published USACE example (98.88 m) is wrong for this reason; the correct value is 89.09 m.
+- **Horizontal curve elements and setting out:** PT = PC + L.
+
+**Published examples reproduced**
+- Wikibooks
+- NPTEL chapters 13, 15, 17 and 18
+- RHD pages 26 and 32
+- Indiana Example 44-3.2
+- Engineering Hulk and Mathalino
+
+**Values supplied from general knowledge**, each marked in the code; please check:
+- IRC friction factors by speed (0.40 to 0.35)
+- the relative gradient at 130 km/h (from WYDOT)
+- the AASHTO sag comfort length AV²/395, shown for information only
+
+### Pavements: `pavement.ts` (37 tests)
+
+**AASHTO 1993 flexible (structural number) and rigid (slab thickness)**
+- The rigid equation uses the constant 1.624×10⁷. The FHWA web page misprints it.
+- ZR uses the exact inverse normal. It matches AASHTO Table 4.1 to 0.001 except at 99.99%, where the table prints −3.750 and the exact value is −3.719.
+- Reproduced to ±0.05:
+  - flexible: AASHTO Fig. 3.1 and Appendix H; FHWA NHI-05-037 Chapter 6 and Appendix C; JICA Bangladesh
+  - rigid: AASHTO Fig. 3.7 and Appendix I; FHWA Chapter 6
+
+**Traffic**
+- Cumulative ESAL/msa by the RHD, LGED, IRC:37 and AASHTO methods; the published examples reproduce.
+- The AASHTO load-equivalency (LEF) equation reproduces Table D.4.
+
+**RHD Pavement Design Guide 2005 catalogue**
+- The Appendix 2 example reproduces: 40 + 90 mm asphalt, 250 mm base Type I, 200 mm sub-base and 300 mm improved subgrade.
+- **Improved subgrade:** the guide's Table 6 and Appendix 1 conflict. The conservative Appendix values are the default, and Table 6 can be selected instead.
+
+### Concrete mix design: `mixdesign.ts` (36 tests)
+
+**ACI 211.1**, SI and inch-pound tables, with code checks for ACI 318 (USA) or BNBC 2020 (Bangladesh)
+- **BNBC 2020 checks:**
+  - f'cr from Part 6 Ch. 5
+  - Table 6.5.6 w/c when there are no trial data
+  - Table 6.8.3 durability minimums
+  - brick chips (khoa) prohibited in severe environments
+- **Examples reproduced within ±2 kg:**
+  - ACI 211.1 Appendix 2 (SI)
+  - ACI 211.1 Examples 1 and 2 (inch-pound)
+  - PCA EB001 Example 1, using PCA's own rules as input overrides
+- **The psi constants for f'cr are from ACI 301 / 318 practice and were not read from a source document.** They are +1000 psi, +1200 psi, and 1.10f'c + 700 psi; and −500 psi with test data. Please confirm.
+
+**IS 10262:2019 with IS 456 durability**
+- The Annex A M40 example reproduces.
+- The w/c from Fig. 1 is a digitised curve (±1 MPa). It is always labelled as approximate and can be overridden.
+
+### Drainage: `drainage.ts` (7 tests)
+
+- **Methods:**
+  - rational method (SI and US), with HEC-22 frequency factors
+  - Kirpich time of concentration
+  - Manning for full and part-full pipes and for channels
+  - pipe sizing with a self-cleansing velocity check (0.9 m/s storm, 0.6 m/s sanitary)
+- **Examples reproduced:** HEC-22 Examples 3-3 and 5-1, and the gutter example.
+- **Rainfall intensity** must come from the local IDF curve; for the USA that is NOAA Atlas 14.
+
+### Cost estimates and schedules: `estimate.ts`, `schedule.ts`
+
+- **Cost estimate:** amount = quantity × rate. Overhead, profit, contingency and taxes are applied on the running total and rounded to 2 decimals per line. Rates are never filled in by the software.
+- **Schedule:** critical path method (CPM) with FS/SS/FF/SF links and lags, calendars for Bangladesh and US weekends, and holidays. Milestones take their predecessor's finish date.
+- **Tests:** a hand-computed textbook network and a precedence network with lags.
+- **Excel export:** the workbook formulas are recalculated independently by LibreOffice and match the engine exactly.
+
 ### Quantities and units
 
 - **Concrete:**

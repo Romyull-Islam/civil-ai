@@ -3,10 +3,18 @@ import type { ToolDef, ToolOutput } from "@/lib/tools";
 export type ContentPart =
   | { type: "text"; text: string }
   | { type: "image"; mimeType: string; data: string /* base64 */ }
+  /** text extracted from an attached PDF / Word / Excel / CSV file (see lib/docs/extract.ts) */
+  | { type: "document"; name: string; kind: string; text: string; pages?: number; truncated?: boolean }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown>; /** opaque provider token (Gemini thought signature) that must be echoed back */ signature?: string }
   | { type: "tool_result"; id: string; name: string; content: string; isError?: boolean };
 
 export interface ChatMessage { role: "user" | "assistant" | "tool"; parts: ContentPart[] }
+
+/** How an attached document is presented to the model. */
+export function documentAsText(p: { name: string; kind: string; text: string; pages?: number; truncated?: boolean }, maxChars?: number): string {
+  const body = maxChars && p.text.length > maxChars ? p.text.slice(0, maxChars) + "\n…[shortened]" : p.text;
+  return `[Attached document: ${p.name} (${p.kind.toUpperCase()}${p.pages ? `, ${p.pages} pages` : ""}${p.truncated ? ", shortened" : ""}). Use the values in it, quote them exactly, and say which document and page they came from.]\n<<<\n${body}\n>>>`;
+}
 
 export interface ProviderRequest {
   model: string;

@@ -3,10 +3,15 @@ import { NextResponse, type NextRequest } from "next/server";
 /** SaaS mode: send signed-out visitors to /login (pages) or 401 (APIs). Session validity is checked in the route handlers. */
 export function proxy(req: NextRequest) {
   const mode = process.env.CIVIL_AI_MODE ?? (process.env.CIVIL_AI_DESKTOP ? "desktop" : "saas");
-  if (mode !== "saas") return NextResponse.next();
+  if (mode !== "saas" && mode !== "company") return NextResponse.next();
   const { pathname } = req.nextUrl;
-  const open = ["/login", "/signup", "/verify", "/forgot", "/reset", "/pricing", "/help", "/terms", "/privacy", "/refund-policy", "/share", "/api/share", "/api/promo", "/api/auth", "/api/health", "/api/tools", "/api/site", "/api/tickets", "/api/checkout/return", "/api/checkout/ipn", "/api/webhooks", "/api/cron", "/favicon.ico"];
-  if (open.some((p) => pathname === p || pathname.startsWith(p + "/"))) return NextResponse.next();
+  const under = (list: string[]) => list.some((p) => pathname === p || pathname.startsWith(p + "/"));
+  // Company installs: no payments, plans, promotions or link to CivilMate's cloud; everything else needs a signed-in user.
+  if (mode === "company" && under(["/pricing", "/subscribe", "/billing", "/team", "/refund-policy", "/api/checkout", "/api/payments", "/api/billing", "/api/team", "/api/webhooks", "/api/promo", "/api/cloud", "/api/cron", "/api/admin/payments", "/api/admin/gateways", "/api/admin/plans", "/api/admin/packs", "/api/admin/credits", "/api/admin/teams", "/api/admin/promo-stats"])) {
+    return pathname.startsWith("/api/") ? NextResponse.json({ error: "Not available in the company edition" }, { status: 404 }) : NextResponse.redirect(new URL("/", req.url));
+  }
+  const open = mode === "company" ? ["/login", "/signup", "/verify", "/forgot", "/reset", "/help", "/terms", "/privacy", "/api/auth", "/api/health", "/api/site", "/favicon.ico"] : ["/login", "/signup", "/verify", "/forgot", "/reset", "/pricing", "/help", "/terms", "/privacy", "/refund-policy", "/share", "/api/share", "/api/promo", "/api/auth", "/api/health", "/api/tools", "/api/site", "/api/tickets", "/api/checkout/return", "/api/checkout/ipn", "/api/webhooks", "/api/cron", "/favicon.ico"];
+  if (under(open)) return NextResponse.next();
   // CSRF: cookie-authenticated state-changing API calls must come from this site (gateway returns/IPNs/webhooks are in `open`).
   if (pathname.startsWith("/api/") && req.method !== "GET" && req.cookies.get("civil_session")?.value) {
     const origin = req.headers.get("origin") ?? (req.headers.get("referer") ? new URL(req.headers.get("referer")!).origin : null);

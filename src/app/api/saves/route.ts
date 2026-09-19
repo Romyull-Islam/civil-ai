@@ -1,9 +1,9 @@
 import { getSessionUser } from "@/lib/saas/service";
 import { getDB } from "@/lib/saas/db";
 import { putSave, readSave, quotaFor } from "@/lib/saas/saves";
-import { appMode } from "@/lib/saas/mode";
+import { hasAccounts } from "@/lib/saas/mode";
 export const runtime = "nodejs";
-const auth = async (req: Request) => (appMode() === "saas" ? getSessionUser(req) : null);
+const auth = async (req: Request) => (hasAccounts() ? getSessionUser(req) : null);
 
 export async function GET(req: Request) {
   const u = await auth(req);

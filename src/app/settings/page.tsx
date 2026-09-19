@@ -4,15 +4,15 @@ import { Settings as SettingsIcon, RefreshCw, ExternalLink, Check, Eye, EyeOff }
 import { PROVIDERS, AUTO_CHAIN } from "@/lib/ai/registry";
 import { LocalAI } from "@/components/LocalAI";
 import { CloudAccount } from "@/components/CloudAccount";
-import { useSettings, saveSettings, type AppSettings } from "@/lib/client/settings";
-import { useSession } from "@/lib/client/session";
+import { useSettings, saveSettings, COUNTRY_PRESETS, type AppSettings } from "@/lib/client/settings";
+import { useSession, accountsMode } from "@/lib/client/session";
 import { db, type Conversation } from "@/lib/db";
 import { Download, Upload, Trash2 } from "lucide-react";
 
 export default function SettingsPage() {
   const s = useSettings();
   const session = useSession();
-  const saas = session?.mode === "saas";
+  const saas = accountsMode(session);
   const byok = session?.mode === "byok";
   const [envConfigured, setEnvConfigured] = useState<string[]>([]);
   const [live, setLive] = useState<Record<string, string[] | string>>({});
@@ -110,13 +110,20 @@ export default function SettingsPage() {
         <section className="card p-4 grid gap-3">
           <h2 className="font-medium">Engineering preferences</h2>
           <div className="grid sm:grid-cols-2 gap-3">
+            <div className="sm:col-span-2"><label className="label">Country</label>
+              <select className="select mt-1" value={s.preferences.country ?? (s.preferences.designCode?.includes("USA") ? "US" : s.preferences.designCode?.includes("BNBC") ? "BD" : "other")} onChange={(e) => { const c = e.target.value as "BD" | "US" | "other"; update({ preferences: { ...s.preferences, ...(c === "other" ? { country: c } : COUNTRY_PRESETS[c]) } }); }}>
+                <option value="BD">Bangladesh: BNBC 2020, RHD / LGED, SI units, BDT</option>
+                <option value="US">United States: ACI 318, AISC 360, ASCE 7, IBC / IRC, AASHTO, US units, USD</option>
+                <option value="other">Other (choose the code and units below)</option>
+              </select>
+              <div className="text-[11px] text-muted mt-0.5">Sets the default design code, units and standards the assistant uses. You can still ask for any code in a question.</div></div>
             <div><label className="label">Default design code</label>
               <select className="select mt-1" value={s.preferences.designCode ?? ""} onChange={(e) => update({ preferences: { ...s.preferences, designCode: e.target.value } })}>
                 {["BNBC 2020 (Bangladesh)", "IS 456 / IS 800 (India)", "GB 50010 (China)", "ACI 318 / AISC 360 (USA)", "BCP-SP 2021 (Pakistan)", "NBC 105 / NBC 205 (Nepal)", "Eurocode 2 / Eurocode 3", "BS 8110 / BS 5950", "AS 3600 / AS 4100"].map((c) => <option key={c}>{c}</option>)}
               </select></div>
             <div><label className="label">Units</label>
               <select className="select mt-1" value={s.preferences.units ?? "SI"} onChange={(e) => update({ preferences: { ...s.preferences, units: e.target.value as "SI" | "imperial" } })}><option value="SI">SI (kN, m, MPa)</option><option value="imperial">Imperial (kip, ft, psi)</option></select></div>
-            <div><label className="label">Region / jurisdiction</label><input className="input mt-1" value={s.preferences.region ?? ""} placeholder="e.g. Dhaka, Bangladesh" onChange={(e) => update({ preferences: { ...s.preferences, region: e.target.value } })} /></div>
+            <div><label className="label">City / state (jurisdiction)</label><input className="input mt-1" value={s.preferences.region ?? ""} placeholder={s.preferences.country === "US" ? "e.g. Austin, Texas" : "e.g. Dhaka, Bangladesh"} onChange={(e) => update({ preferences: { ...s.preferences, region: e.target.value } })} /></div>
             <div><label className="label">Your name (optional)</label><input className="input mt-1" value={s.preferences.name ?? ""} onChange={(e) => update({ preferences: { ...s.preferences, name: e.target.value } })} /></div>
             <div><label className="label">Auto-delete chats unused for</label>
               <select className="select mt-1" value={s.autoDeleteDays} onChange={(e) => update({ autoDeleteDays: Number(e.target.value) })}><option value={0}>Never (keep forever)</option><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option><option value={365}>1 year</option></select>

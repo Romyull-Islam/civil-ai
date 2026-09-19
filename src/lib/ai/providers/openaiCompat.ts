@@ -3,17 +3,17 @@ import OpenAI from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionTool, ChatCompletionContentPart } from "openai/resources/chat/completions";
 import { toolJsonSchema } from "@/lib/tools";
 import { PROVIDER_MAP } from "../registry";
-import { ProviderRequest, ProviderTurn, Provider, ProviderUnavailableError, ChatMessage } from "../types";
+import { ProviderRequest, ProviderTurn, Provider, ProviderUnavailableError, ChatMessage, documentAsText } from "../types";
 
 function toMessages(system: string, messages: ChatMessage[]): ChatCompletionMessageParam[] {
   const out: ChatCompletionMessageParam[] = [{ role: "system", content: system }];
   for (const m of messages) {
     if (m.role === "user") {
-      const parts = m.parts.flatMap<ChatCompletionContentPart>((p) => p.type === "text" ? [{ type: "text" as const, text: p.text }] : p.type === "image" ? [{ type: "image_url" as const, image_url: { url: `data:${p.mimeType};base64,${p.data}` } }] : []);
+      const parts = m.parts.flatMap<ChatCompletionContentPart>((p) => p.type === "text" ? [{ type: "text" as const, text: p.text }] : p.type === "document" ? [{ type: "text" as const, text: documentAsText(p) }] : p.type === "image" ? [{ type: "image_url" as const, image_url: { url: `data:${p.mimeType};base64,${p.data}` } }] : []);
       const onlyText = parts.every((p) => p.type === "text");
       out.push({ role: "user", content: onlyText ? parts.map((p) => (p as { text: string }).text).join("\n") || "(empty)" : parts });
     } else if (m.role === "assistant") {
-      const text = m.parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join("");
+      const text = m.parts.map((p) => (p.type === "text" ? p.text : p.type === "document" ? documentAsText(p) : "")).join("\n");
       const calls = m.parts.filter((p) => p.type === "tool_call") as Extract<ChatMessage["parts"][number], { type: "tool_call" }>[];
       out.push({ role: "assistant", content: text || null, ...(calls.length ? { tool_calls: calls.map((c) => ({ id: c.id, type: "function" as const, function: { name: c.name, arguments: JSON.stringify(c.args) } })) } : {}) });
     } else {

@@ -7,7 +7,7 @@ export const SHARE_DAYS = Number(process.env.SHARE_DAYS ?? 30);
 export const SHARE_MAX_ACTIVE = Number(process.env.SHARE_MAX_ACTIVE ?? 20);
 const MAX_BYTES = 1024 * 1024;
 
-type Part = { type: string; data?: string; text?: string };
+type Part = { type: string; data?: string; text?: string; name?: string };
 type Msg = { role: string; parts?: Part[]; toolOutputs?: Record<string, { display?: { kind: string; svg?: string } }>; meta?: Record<string, unknown> };
 
 /** Keep what a reader needs; drop images, cached SVG, usage/provider details. */
@@ -16,7 +16,7 @@ export function sanitizeForShare(conv: { title?: string; messages?: Msg[] }) {
     title: String(conv.title ?? "Shared conversation").slice(0, 120),
     messages: (conv.messages ?? []).filter((m) => m.role === "user" || m.role === "assistant").map((m) => ({
       role: m.role,
-      parts: (m.parts ?? []).map((p) => (p.type === "image" ? { type: "text", text: "[image not included]" } : p)),
+      parts: (m.parts ?? []).map((p) => (p.type === "image" ? { type: "text", text: "[image not included]" } : p.type === "document" ? { type: "text", text: `[document not included: ${p.name}]` } : p)),
       toolOutputs: m.toolOutputs && Object.fromEntries(Object.entries(m.toolOutputs).map(([k, v]) => [k, v.display?.kind === "drawing" ? { ...v, display: { ...v.display, svg: "" } } : v])),
     })),
   };

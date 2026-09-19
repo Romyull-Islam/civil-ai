@@ -2,7 +2,7 @@ import { appMode } from "@/lib/saas/mode";
 import { cloudLogin, cloudMe } from "@/lib/saas/cloud";
 export const runtime = "nodejs";
 export async function POST(req: Request) {
-  if (appMode() === "saas") return Response.json({ error: "Not available on the hosted service" }, { status: 400 });
+  if (appMode() === "saas" || appMode() === "company") return Response.json({ error: "Not available on this installation" }, { status: 400 });
   try {
     const { backendUrl, email, password } = (await req.json()) as { backendUrl: string; email: string; password: string };
     const link = await cloudLogin(backendUrl, email, password);

@@ -24,6 +24,8 @@ export interface SiteSettings {
   supportPhone: string;
   whatsapp: string;
   requireEmailVerification: "auto" | "always" | "never"; // auto = when an email API key is configured
+  /** Answer only civil/construction questions; others are refused before any AI call (no tokens). */
+  topicGuard: "on" | "off";
   payment: { bkash: string; nagad: string; rocket: string; bank: string; qrImage: string; note: string; currency: string; conversion: number /* price × conversion = local amount */ };
   faq: string; // markdown
   cancellationPolicy: string; // markdown
@@ -43,6 +45,7 @@ export const DEFAULT_SITE: SiteSettings = {
   supportPhone: "",
   whatsapp: "",
   requireEmailVerification: "auto",
+  topicGuard: "on",
   payment: { bkash: "", nagad: "", rocket: "", bank: "", qrImage: "", note: "Send the exact amount, then submit the Transaction ID below. Plans are activated within 24 hours after we verify the payment.", currency: "BDT", conversion: 1 },
   faq: `## Frequently asked questions
 

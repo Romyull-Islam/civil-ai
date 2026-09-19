@@ -1,12 +1,12 @@
 import { GoogleGenAI, type Content, type Part, type FunctionDeclaration } from "@google/genai";
 import { toolJsonSchema } from "@/lib/tools";
-import { ProviderRequest, ProviderTurn, Provider, ProviderUnavailableError, ChatMessage } from "../types";
+import { ProviderRequest, ProviderTurn, Provider, ProviderUnavailableError, ChatMessage, documentAsText } from "../types";
 
 export function toContents(messages: ChatMessage[]): Content[] {
   const out: Content[] = [];
   for (const m of messages) {
     if (m.role === "user") {
-      const parts = m.parts.flatMap<Part>((p) => p.type === "text" ? [{ text: p.text }] : p.type === "image" ? [{ inlineData: { mimeType: p.mimeType, data: p.data } }] : []);
+      const parts = m.parts.flatMap<Part>((p) => p.type === "text" ? [{ text: p.text }] : p.type === "document" ? [{ text: documentAsText(p) }] : p.type === "image" ? [{ inlineData: { mimeType: p.mimeType, data: p.data } }] : []);
       out.push({ role: "user", parts: parts.length ? parts : [{ text: "(empty)" }] });
     } else if (m.role === "assistant") {
       const parts = m.parts.flatMap<Part>((p) => p.type === "text" && p.text.trim() ? [{ text: p.text }] : p.type === "tool_call" ? [{ functionCall: { id: p.id, name: p.name, args: p.args }, ...(p.signature ? { thoughtSignature: p.signature } : {}) }] : []);

@@ -23,6 +23,7 @@ export function conversationToMarkdown(c: Conversation): string {
     for (const p of m.parts) {
       if (p.type === "text") lines.push(p.text, "");
       else if (p.type === "image") lines.push("_[image attached]_", "");
+      else if (p.type === "document") lines.push(`_[document attached: ${p.name}]_`, "");
       else if (p.type === "tool_call") lines.push(toolLines(m, p.id, p.name), "");
     }
     if (m.meta?.error) lines.push(`_Error: ${m.meta.error}_`, "");

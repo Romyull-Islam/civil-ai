@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { BarChart3 } from "lucide-react";
-import { useSession } from "@/lib/client/session";
+import { useSession, accountsMode } from "@/lib/client/session";
 import { UsageBars } from "@/components/UsageBars";
 import { useNow } from "@/lib/client/now";
 
@@ -10,7 +10,7 @@ export default function UsagePage() {
   const s = useSession();
   const now = useNow(30000);
   if (!s) return <div className="p-6 text-sm text-muted">Loading…</div>;
-  if (s.mode !== "saas") return <div className="p-6 text-sm text-muted">Usage limits apply to the online service only. The offline model in this app is unlimited.</div>;
+  if (!accountsMode(s)) return <div className="p-6 text-sm text-muted">Usage limits apply to the online service only. The offline model in this app is unlimited.</div>;
   if (!s.user) return <div className="p-6 text-sm">Please <Link className="text-accent2" href="/login?next=/usage">sign in</Link>.</div>;
   return (
     <div className="h-full overflow-y-auto">

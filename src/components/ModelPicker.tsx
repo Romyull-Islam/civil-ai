@@ -5,7 +5,7 @@ import { Sparkles, ChevronDown, Check, Eye, Lock } from "lucide-react";
 import { useSettings, saveSettings } from "@/lib/client/settings";
 import { friendlyModel, TIER_LABEL, type Tier } from "@/lib/ai/friendly";
 import { PROVIDERS } from "@/lib/ai/registry";
-import { useSession } from "@/lib/client/session";
+import { useSession, accountsMode } from "@/lib/client/session";
 import { estimateCredits } from "@/lib/saas/credits";
 import { UsageBars } from "./UsageBars";
 import { useNow } from "@/lib/client/now";
@@ -14,7 +14,7 @@ import { useNow } from "@/lib/client/now";
 export function ModelPicker() {
   const s = useSettings();
   const session = useSession();
-  if (session?.mode === "saas") return <PlanModelChooser />;
+  if (accountsMode(session)) return <PlanModelChooser />;
   const cloud = session?.cloud;
   if (cloud?.linked && cloud.allowedModels?.length) {
     const cur = s.provider === "local" || s.provider === "local-first" || s.provider === "ollama" ? "local" : `${s.provider}|${s.model ?? cloud.allowedModels.find((m) => m.provider === s.provider)?.model ?? ""}`;

@@ -29,7 +29,7 @@ export function friendlyError(raw: string, provider?: string): string {
 /** Rough token estimate (chars/4; images ~1,000). */
 function estimateTokens(msgs: ChatMessage[]): number {
   let n = 0;
-  for (const m of msgs) for (const p of m.parts) n += p.type === "text" ? p.text.length / 4 : p.type === "image" ? 1000 : p.type === "tool_call" ? JSON.stringify(p.args).length / 4 + 20 : p.content.length / 4 + 10;
+  for (const m of msgs) for (const p of m.parts) n += p.type === "text" ? p.text.length / 4 : p.type === "document" ? p.text.length / 4 + 30 : p.type === "image" ? 1000 : p.type === "tool_call" ? JSON.stringify(p.args).length / 4 + 20 : p.content.length / 4 + 10;
   return n;
 }
 
@@ -47,17 +47,21 @@ export function compactHistory(messages: ChatMessage[], budgetTokens = 24000): C
     if (p.type === "image") return [{ type: "text" as const, text: "[image omitted from history]" }];
     if (p.type === "tool_result") return [{ ...p, content: p.content.length > 300 ? p.content.slice(0, 300) + " …(truncated)" : p.content }];
     if (p.type === "text" && p.text.length > 2000) return [{ type: "text" as const, text: p.text.slice(0, 2000) + " …(truncated)" }];
+    if (p.type === "document" && p.text.length > 12000) return [{ ...p, text: p.text.slice(0, 12000) + "\n…[shortened in history]", truncated: true }];
     return [p];
   }) });
+  // Documents in turns that get dropped are carried forward (shortened), so follow-up questions about them still work.
+  const carried: ContentPart[] = [];
   while (estimateTokens(out) > budgetTokens && out.length > keepRecent + 1) {
     // drop the oldest turn (must keep tool_call/tool_result pairs together)
     let n = 1;
     if (out[0].role === "assistant" && out[0].parts.some((p) => p.type === "tool_call") && out[1]?.role === "tool") n = 2;
+    for (const m of out.slice(0, n)) for (const p of m.parts) if (p.type === "document") carried.push({ ...p, text: p.text.slice(0, 6000), truncated: true });
     out = out.slice(n);
   }
   // Always start with a user message; prepend a note about removed context.
   while (out.length && out[0].role !== "user") out = out.slice(1);
-  return [{ role: "user", parts: [{ type: "text", text: "[Earlier parts of this conversation were summarised/removed to fit the model's context. Ask me to repeat anything if needed.]" }] }, { role: "assistant", parts: [{ type: "text", text: "Understood." }] }, ...out];
+  return [{ role: "user", parts: [{ type: "text", text: "[Earlier parts of this conversation were summarised/removed to fit the model's context. Ask me to repeat anything if needed.]" }, ...carried] }, { role: "assistant", parts: [{ type: "text", text: "Understood." }] }, ...out];
 }
 
 /** Small local models sometimes leak chain-of-thought into the answer (e.g. text ending with a stray "</think>"). Remove it. */
@@ -115,7 +119,7 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
   // Small local models (llama.cpp / Ollama) get a compact prompt and only the tools relevant to the conversation,
   // which cuts the first-turn prompt from ~8K to ~2K tokens (the dominant cost on CPU-only PCs).
   const localOnly = cands.length > 0 && cands.every((c) => c.id === "local" || c.id === "ollama");
-  const convoText = messages.filter((m) => m.role === "user").map((m) => m.parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join(" ")).join(" ");
+  const convoText = messages.filter((m) => m.role === "user").map((m) => m.parts.map((p) => (p.type === "text" ? p.text : p.type === "document" ? `${p.name} ${p.text.slice(0, 3000)}` : "")).join(" ")).join(" ");
   const tools = opts.toolNames ? TOOLS.filter((t) => opts.toolNames!.includes(t.name)) : selectToolsForText(convoText);
   const system = localOnly ? buildCompactSystemPrompt(opts.preferences) : buildSystemPrompt(opts.preferences);
   if (!cands.length) {
@@ -133,7 +137,7 @@ export async function runAgent(opts: AgentOptions): Promise<void> {
   let groundRetried = false;
   // Where figures in the final answer may come from: the conversation as sent (user input, earlier answers, earlier
   // tool results) plus tool results produced in this run. Our own nudge messages are deliberately excluded.
-  const groundSources: string[] = opts.messages.flatMap((m) => m.parts.map((p) => (p.type === "text" ? p.text : p.type === "tool_result" ? p.content : "")));
+  const groundSources: string[] = opts.messages.flatMap((m) => m.parts.map((p) => (p.type === "text" ? p.text : p.type === "document" ? p.text : p.type === "tool_result" ? p.content : "")));
   let toolsUsed = false;
   // Constants stated in the offered tools' descriptions (e.g. "katha = 720 sq ft") are vetted, so they count as sources.
   groundSources.push(...tools.map((t) => t.description));
