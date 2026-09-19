@@ -6,7 +6,8 @@
 import { z } from "zod";
 import { analyzeBeam, rectI, type BeamResult } from "@/lib/eng/beam";
 import { convert, UNIT_CATALOG } from "@/lib/eng/units";
-import { designRcBeam, designOneWaySlab, designIsolatedFooting } from "@/lib/eng/rc";
+import { designRcBeam, designOneWaySlab, designIsolatedFooting, beamCapacity } from "@/lib/eng/rc";
+import { drawingToInches, usLabel, feetInches } from "@/lib/drawing/units";
 import { designColumn } from "@/lib/eng/column";
 import { bearingCapacity, earthPressure, consolidationSettlement, sptAllowablePressure, stress21 } from "@/lib/eng/soil";
 import { concreteMaterials, rebarSchedule, brickMasonry, plasterQuantity, paintQuantity, tileQuantity, excavation, NOMINAL_MIXES, CFT_PER_M3 } from "@/lib/eng/quantity";
@@ -39,6 +40,31 @@ export interface ToolOutput { result: unknown; display?: Display; summary?: stri
 /** Drawing of a designed member, attached to design results so the DXF can be opened in AutoCAD straight away. */
 const designDrawing = (d: Drawing) => ({ drawing: d, svg: toSvg(d) });
 const num = (label: string | undefined, re: RegExp) => { const m = label ? re.exec(label) : null; return m ? Number(m[1]) : undefined; };
+
+// ---------- US customary inputs: converted to the engines' SI units at the boundary ----------
+const US_UNITS = { in: [25.4, "in", "mm"], ft: [0.3048, "ft", "m"], ftmm: [304.8, "ft", "mm"], psi: [0.00689476, "psi", "MPa"], ksi: [6.89476, "ksi", "MPa"], kip: [4.448222, "kip", "kN"], kipft: [1.355818, "kip-ft", "kN·m"], klf: [14.5939, "kip/ft", "kN/m"], psf: [0.0478803, "psf", "kPa"], ksf: [47.8803, "ksf", "kPa"], pcf: [0.157087, "pcf", "kN/m³"] } as const;
+type UsKind = keyof typeof US_UNITS;
+const UNITS_FIELD = z.enum(["SI", "US"]).default("SI").describe("SI: mm, m, MPa, kN, kN·m, kPa, kN/m³. US: in, ft, psi (f'c), ksi (fy), kip, kip-ft, kip/ft, psf/ksf, pcf; US bars #3–#11 are given as bar numbers (5 = #5)");
+const sig = (x: number) => Number(x.toPrecision(4));
+/** Convert the listed US inputs to SI (f'c typed in ksi or fy in psi are recognised) and describe the conversion. */
+function fromUS<T extends Record<string, unknown>>(inp: T, spec: Partial<Record<string, UsKind>>): { si: T; note: string | null; us: boolean } {
+  if (inp.units !== "US") return { si: inp, note: null, us: false };
+  const si: Record<string, unknown> = { ...inp };
+  const parts: string[] = [];
+  for (const [k, kind] of Object.entries(spec)) {
+    let v = inp[k];
+    if (typeof v !== "number" || !kind) continue;
+    if (kind === "psi" && v < 20) v *= 1000; // 4 → 4000 psi
+    if (kind === "ksi" && v > 1000) v /= 1000; // 60000 → 60 ksi
+    const [f, u, su] = US_UNITS[kind];
+    si[k] = v * f;
+    parts.push(`${k} ${v} ${u} = ${sig(v * f)} ${su}`);
+  }
+  return { si: si as T, note: parts.length ? `US inputs converted to SI for the calculation: ${parts.join("; ")}.` : null, us: true };
+}
+const inch = (mm: number, dp = 2) => `${(mm / 25.4).toFixed(dp)} in`;
+const kipft = (kNm: number) => `${(kNm / 1.355818).toFixed(1)} kip-ft`;
+const in2 = (mm2: number) => `${(mm2 / 645.16).toFixed(2)} in²`;
 
 export interface ToolDef<S extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string;
@@ -102,22 +128,56 @@ export const TOOLS: ToolDef[] = [
     category: "design",
     description: "Design a rectangular reinforced-concrete beam for flexure (singly or doubly reinforced) and shear. Codes: BNBC2020 (Bangladesh, default), ACI318 (ACI 318-19) or IS456 (IS 456:2000). Inputs mm, MPa, kN·m, kN. Give span and support to also check depth for deflection.",
     schema: z.object({
+      units: UNITS_FIELD,
       code: z.enum(["BNBC2020", "ACI318", "IS456"]).default("BNBC2020"),
       b: z.number().positive().describe("width mm"), D: z.number().positive().describe("overall depth mm"),
       cover: z.number().optional().describe("clear cover to stirrups mm (default 40 BNBC/ACI, 25 IS)"),
       fck: z.number().positive().describe("concrete strength MPa: f'c for BNBC/ACI, fck for IS"), fy: z.number().positive().describe("main steel yield MPa"),
       fyStirrup: z.number().optional().describe("stirrup yield MPa (default = fy; capped at 420 BNBC/ACI, 415 IS)"),
       Mu: z.number().positive().describe("factored moment kN·m"), Vu: z.number().optional().describe("factored shear kN"),
-      stirrupDia: z.number().optional(), mainBarDia: z.number().default(16),
+      stirrupDia: z.number().optional().describe("mm (US: bar number, default #3)"), mainBarDia: z.number().optional().describe("mm, default 16 (US: bar number, default 6)"),
       span: z.number().optional().describe("m, for the depth/deflection check"), support: z.enum(["simply_supported", "one_end_continuous", "both_ends_continuous", "cantilever"]).optional(),
     }),
     run: (inp) => {
-      const r = designRcBeam(inp);
-      const summary = `${r.code}: As = ${r.AstRequired.toFixed(0)} mm² → ${r.tensionBars[0]?.label ?? "increase section"}${r.AscRequired > 0 ? `; compression steel ${r.AscRequired.toFixed(0)} mm² → ${r.compressionBars?.[0]?.label ?? ""}` : ""}${r.shear ? `; ${r.shear.stirrupLabel}` : ""}`;
+      const { si, note, us } = fromUS(inp, { b: "in", D: "in", cover: "in", fck: "psi", fy: "ksi", fyStirrup: "ksi", Mu: "kipft", Vu: "kip", span: "ft" });
+      const r = designRcBeam({ ...si, barSystem: us ? "US" : "metric" });
       const tb = r.tensionBars[0], cb = r.compressionBars?.[0];
-      const sDia = num(r.shear?.stirrupLabel, /Ø(\d+)/);
-      const drawing = tb ? designDrawing(beamSection({ b: inp.b, D: inp.D, cover: inp.cover ?? (r.code === "IS456" ? 25 : 40), bottomBars: { count: tb.count, dia: tb.diameter }, topBars: cb ? { count: cb.count, dia: cb.diameter } : { count: 2, dia: 12 }, stirrup: r.shear && sDia ? { dia: sDia, spacing: r.shear.stirrupSpacing } : undefined, title: `RC BEAM ${inp.b} x ${inp.D} (${r.code})`, notes: [`Bottom: ${tb.label}`, cb ? `Top: ${cb.label} (compression steel)` : "Top: 2 × Ø12 hanger bars (nominal, not designed)", ...(r.shear ? [`Stirrups: ${r.shear.stirrupLabel}`] : []), "Preliminary design: check and detail per the applicable code."] })) : undefined;
-      return { result: r, display: { kind: "steps", title: `RC beam ${inp.b}×${inp.D} (${r.code})`, steps: r.steps, checks: r.checks }, drawing, summary };
+      const sDia = r.shear ? num(r.shear.stirrupLabel, /Ø(\d+(?:\.\d+)?)/) ?? (us ? num(r.shear.stirrupLabel, /#(\d+)/) : undefined) : undefined;
+      const stirDiaMm = sDia !== undefined && us && /#/.test(r.shear?.stirrupLabel ?? "") ? { 3: 9.525, 4: 12.7, 5: 15.875 }[sDia] ?? 9.525 : sDia;
+      const topNote = cb ? `Top: ${cb.label} (compression steel)` : us ? "Top: 2 #4 hanger bars (nominal, not designed)" : "Top: 2 × Ø12 hanger bars (nominal, not designed)";
+      let dwg = tb ? beamSection({ b: si.b, D: si.D, cover: si.cover ?? (r.code === "IS456" ? 25 : 40), bottomBars: { count: tb.count, dia: tb.diameter }, topBars: cb ? { count: cb.count, dia: cb.diameter } : { count: 2, dia: us ? 12.7 : 12 }, stirrup: r.shear && stirDiaMm ? { dia: stirDiaMm, spacing: r.shear.stirrupSpacing } : undefined, title: `RC BEAM ${inp.b} x ${inp.D}${us ? " in" : ""} (${r.code})`, notes: [`Bottom: ${tb.label}`, topNote, ...(r.shear ? [`Stirrups: ${r.shear.stirrupLabel}`] : []), "Preliminary design: check and detail per the applicable code."] }) : undefined;
+      if (dwg && us) dwg = drawingToInches(dwg);
+      const shear = r.shear ? (us ? usLabel(r.shear.stirrupLabel) : r.shear.stirrupLabel) : "";
+      const summary = us
+        ? `${r.code}: As = ${in2(r.AstRequired)} → ${tb?.label ?? "increase section"}${r.AscRequired > 0 ? `; compression steel ${in2(r.AscRequired)} → ${cb?.label ?? ""}` : ""}${shear ? `; ${shear}` : ""}`
+        : `${r.code}: As = ${r.AstRequired.toFixed(0)} mm² → ${tb?.label ?? "increase section"}${r.AscRequired > 0 ? `; compression steel ${r.AscRequired.toFixed(0)} mm² → ${cb?.label ?? ""}` : ""}${shear ? `; ${shear}` : ""}`;
+      return { result: r, display: { kind: "steps", title: `RC beam ${inp.b}×${inp.D}${us ? " in" : ""} (${r.code})`, steps: [...(note ? [note] : []), ...r.steps], checks: r.checks }, drawing: dwg ? designDrawing(dwg) : undefined, summary };
+    },
+  }),
+  def({
+    name: "rc_beam_capacity",
+    category: "design",
+    description: "Flexural capacity of a GIVEN rectangular RC beam section (analysis, not design): from b, d (or D), the steel As or bars, f'c/fck and fy, returns a, c, net tensile strain εt, φ, Mn and φMn (ACI 318 / BNBC 2020) or Mu,R (IS 456), with minimum-steel, ductility and optional Mu checks, all steps in one call. Use this for 'find the moment capacity / is this beam adequate' questions instead of step-by-step calculate calls.",
+    schema: z.object({
+      units: UNITS_FIELD,
+      code: z.enum(["BNBC2020", "ACI318", "IS456"]).default("BNBC2020"),
+      b: z.number().positive().describe("width mm (US: in)"), d: z.number().positive().optional().describe("effective depth mm (US: in); or give D"),
+      D: z.number().positive().optional().describe("overall depth mm (US: in), used when d is not given"), cover: z.number().optional().describe("clear cover mm (US: in)"),
+      As: z.number().positive().optional().describe("tension steel area mm² (US: in²); or give bars"),
+      bars: z.object({ count: z.number().int().min(1), dia: z.number().positive().describe("mm (US: bar number, e.g. 8 = #8)") }).optional(),
+      fck: z.number().positive().describe("f'c MPa (US: psi) for ACI/BNBC, fck for IS"), fy: z.number().positive().describe("MPa (US: ksi)"),
+      Mu: z.number().optional().describe("factored moment to check, kN·m (US: kip-ft)"),
+    }),
+    run: (inp0) => {
+      const { si: inp, note, us } = fromUS(inp0, { b: "in", d: "in", D: "in", cover: "in", fck: "psi", fy: "ksi", Mu: "kipft" });
+      const As = us && inp0.As !== undefined ? inp0.As * 645.16 : inp.As;
+      const r = beamCapacity({ ...inp, As, barSystem: us ? "US" : "metric" });
+      const aci = r.code !== "IS456";
+      const M = (kNm: number) => (us ? `${kipft(kNm)} (${kNm.toFixed(1)} kN·m)` : `${kNm.toFixed(1)} kN·m`);
+      const summary = aci
+        ? `${r.code}: a = ${us ? inch(r.a ?? 0) : `${r.a?.toFixed(1)} mm`}, c = ${us ? inch(r.c) : `${r.c.toFixed(1)} mm`}, εt = ${r.et?.toFixed(4)}, φ = ${r.phi.toFixed(2)}; Mn = ${M(r.Mn)}; φMn = ${M(r.phiMn)}${r.ok ? "; all checks pass" : "; CHECK FAILS: " + r.checks.filter((c) => !c.ok).map((c) => c.name).join(", ")}`
+        : `IS 456: xu = ${r.c.toFixed(1)} mm; Mu,R = ${M(r.Mn)}${r.ok ? "; all checks pass" : "; CHECK FAILS: " + r.checks.filter((c) => !c.ok).map((c) => c.name).join(", ")}`;
+      return { result: r, display: { kind: "steps", title: `Flexural capacity ${inp0.b} × ${inp0.d ?? inp0.D}${us ? " in" : " mm"} (${r.code})`, steps: [...(note ? [note] : []), ...r.steps], checks: r.checks }, summary };
     },
   }),
   def({
@@ -125,6 +185,7 @@ export const TOOLS: ToolDef[] = [
     category: "design",
     description: "Design or check a rectangular tied RC column for axial load with uniaxial or biaxial moments, by strain compatibility (interaction diagram), including slenderness (moment magnification for braced frames) and minimum eccentricity. Codes: BNBC2020 (default), ACI318, IS456. Finds the lightest bar arrangement if bars are not given. Inputs mm, MPa, kN, kN·m.",
     schema: z.object({
+      units: UNITS_FIELD,
       code: z.enum(["BNBC2020", "ACI318", "IS456"]).default("BNBC2020"),
       b: z.number().positive().describe("column width mm (x direction)"), D: z.number().positive().describe("column depth mm (y direction)"),
       fck: z.number().positive().describe("f'c (BNBC/ACI) or fck (IS), MPa"), fy: z.number().positive(),
@@ -139,12 +200,16 @@ export const TOOLS: ToolDef[] = [
       bars: z.object({ count: z.number().int().min(4), dia: z.number().positive() }).optional().describe("check this arrangement instead of designing"),
       clearCover: z.number().optional().describe("mm, default 40"),
     }),
-    run: (inp) => {
-      const r = designColumn({ code: inp.code, b: inp.b, h: inp.D, fc: inp.fck, fy: inp.fy, Pu: inp.Pu, Mux: inp.Mux, Muy: inp.Muy, lu: inp.unsupportedLength, k: inp.k, braced: inp.braced, endMomentRatio: inp.endMomentRatio, curvature: inp.curvature, bars: inp.bars, clearCover: inp.clearCover });
+    run: (inp0) => {
+      const { si: inp, note, us } = fromUS(inp0, { b: "in", D: "in", fck: "psi", fy: "ksi", Pu: "kip", Mux: "kipft", Muy: "kipft", unsupportedLength: "ftmm", clearCover: "in" });
+      const r = designColumn({ code: inp.code, b: inp.b, h: inp.D, fc: inp.fck, fy: inp.fy, Pu: inp.Pu, Mux: inp.Mux, Muy: inp.Muy, lu: inp.unsupportedLength, k: inp.k, braced: inp.braced, endMomentRatio: inp.endMomentRatio, curvature: inp.curvature, bars: inp.bars, clearCover: inp.clearCover , barSystem: us ? "US" : "metric" });
       const { curve: _c, ...rest } = r; void _c;
-      const tie = /Ø(\d+) ties @ (\d+)/.exec(r.ties ?? "");
-      const drawing = designDrawing(columnSection({ b: inp.b, D: inp.D, cover: inp.clearCover ?? 40, bars: { count: r.bars.count, dia: r.bars.dia }, tie: tie ? { dia: Number(tie[1]), spacing: Number(tie[2]) } : undefined, title: `RC COLUMN ${inp.b} x ${inp.D} (${r.code})` }));
-      return { result: { ...rest, AscRequired: r.bars.area, steelPercent: r.bars.percent }, display: { kind: "steps", title: `RC column ${inp.b}×${inp.D} (${r.code})`, steps: r.steps, checks: r.checks }, drawing, summary: `${r.code}: ${r.bars.label} (${r.bars.area.toFixed(0)} mm², ${r.bars.percent.toFixed(2)}%), ${r.ties}; ${r.ok ? "all checks pass" : "CHECKS FAIL: " + r.checks.filter((c) => !c.ok).map((c) => c.name).join(", ")}` };
+      const tie = /(?:Ø(\d+(?:\.\d+)?)|#(\d+)) ties @ (\d+)/.exec(r.ties ?? "");
+      const tieDia = tie ? (tie[1] ? Number(tie[1]) : ({ 3: 9.525, 4: 12.7 } as Record<string, number>)[tie[2]] ?? 9.525) : undefined;
+      let dwg = columnSection({ b: inp.b, D: inp.D, cover: inp.clearCover ?? 40, bars: { count: r.bars.count, dia: r.bars.dia }, tie: tie && tieDia ? { dia: tieDia, spacing: Number(tie[3]) } : undefined, title: `RC COLUMN ${inp0.b} x ${inp0.D}${us ? " in" : ""} (${r.code})` });
+      if (us) dwg = drawingToInches(dwg);
+      const summary = us ? `${r.code}: ${r.bars.label} (${in2(r.bars.area)}, ${r.bars.percent.toFixed(2)}%), ${usLabel(r.ties)}; ${r.ok ? "all checks pass" : "CHECKS FAIL: " + r.checks.filter((c) => !c.ok).map((c) => c.name).join(", ")}` : `${r.code}: ${r.bars.label} (${r.bars.area.toFixed(0)} mm², ${r.bars.percent.toFixed(2)}%), ${r.ties}; ${r.ok ? "all checks pass" : "CHECKS FAIL: " + r.checks.filter((c) => !c.ok).map((c) => c.name).join(", ")}`;
+      return { result: { ...rest, AscRequired: r.bars.area, steelPercent: r.bars.percent }, display: { kind: "steps", title: `RC column ${inp0.b}×${inp0.D}${us ? " in" : ""} (${r.code})`, steps: [...(note ? [note] : []), ...r.steps], checks: r.checks }, drawing: designDrawing(dwg), summary };
     },
   }),
   def({
@@ -152,48 +217,73 @@ export const TOOLS: ToolDef[] = [
     category: "design",
     description: "Design a one-way RC slab: thickness (deflection), bottom and top bars, distribution bars, shear check. Codes: BNBC2020 (default), ACI318, IS456. Supports: simply supported, end span (one end continuous), interior span (both ends continuous), cantilever. Units m, kN/m², MPa.",
     schema: z.object({
+      units: UNITS_FIELD,
       code: z.enum(["BNBC2020", "ACI318", "IS456"]).default("BNBC2020"),
       span: z.number().positive().describe("effective span m"), liveLoad: z.number().nonnegative().describe("kN/m²"),
-      floorFinish: z.number().default(1).describe("kN/m²"), partitionLoad: z.number().optional().describe("extra dead load kN/m²"),
-      fck: z.number().positive(), fy: z.number().positive(), cover: z.number().default(20),
+      floorFinish: z.number().optional().describe("kN/m² (US: psf), default 1 kN/m² (≈ 21 psf)"), partitionLoad: z.number().optional().describe("extra dead load kN/m² (US: psf)"),
+      fck: z.number().positive(), fy: z.number().positive(), cover: z.number().optional().describe("mm (US: in), default 20 mm"),
       support: z.enum(["simply_supported", "one_end_continuous", "both_ends_continuous", "cantilever"]).default("simply_supported"),
-      thickness: z.number().optional().describe("mm override"), barDia: z.number().optional().describe("main bar mm, default 10"),
+      thickness: z.number().optional().describe("mm override (US: in)"), barDia: z.number().optional().describe("main bar mm, default 10 (US: bar number, default 4)"),
       brickAggregate: z.boolean().optional().describe("brick-chip (khoa) aggregate concrete: 1.5× minimum steel under BNBC"),
     }),
-    run: (inp) => { const r = designOneWaySlab(inp); return { result: r, display: { kind: "steps", title: `One-way slab, span ${inp.span} m (${r.code})`, steps: r.steps, checks: r.checks }, summary: `${r.code}: h = ${r.thickness} mm; ${r.mainBars}${r.topBars ? `; ${r.topBars}` : ""}; distribution ${r.distributionBars}` }; },
+    run: (inp) => {
+      const { si, note, us } = fromUS(inp, { span: "ft", liveLoad: "psf", floorFinish: "psf", partitionLoad: "psf", fck: "psi", fy: "ksi", cover: "in", thickness: "in" });
+      const r = designOneWaySlab({ ...si, barSystem: us ? "US" : "metric" });
+      const t = (x: string) => (us ? usLabel(x) : x);
+      const h = us ? `${inch(r.thickness)} (${r.thickness} mm; use ${Math.ceil((r.thickness / 25.4) * 2) / 2} in)` : `${r.thickness} mm`;
+      return { result: r, display: { kind: "steps", title: `One-way slab, span ${inp.span} ${us ? "ft" : "m"} (${r.code})`, steps: [...(note ? [note] : []), ...r.steps], checks: r.checks }, summary: `${r.code}: h = ${h}; ${t(r.mainBars)}${r.topBars ? `; ${t(r.topBars)}` : ""}; distribution ${t(r.distributionBars)}` };
+    },
   }),
   def({
     name: "design_isolated_footing",
     category: "design",
     description: "Size and design a square isolated RC footing: plan size from allowable bearing, depth from one-way and punching shear, bottom bars, development length and column bearing. Codes: BNBC2020 (default), ACI318, IS456. Give dead and live loads separately when known. Units mm, kN, kN/m², MPa.",
     schema: z.object({
+      units: UNITS_FIELD,
       code: z.enum(["BNBC2020", "ACI318", "IS456"]).default("BNBC2020"),
       columnB: z.number().positive().describe("mm"), columnD: z.number().positive().describe("mm"),
       serviceLoad: z.number().positive().optional().describe("total unfactored column load kN (if dead/live not given)"),
       deadLoad: z.number().nonnegative().optional().describe("unfactored dead load kN"), liveLoad: z.number().nonnegative().optional().describe("unfactored live load kN"),
       safeBearingCapacity: z.number().positive().describe("allowable net bearing pressure kN/m²"),
       fck: z.number().positive(), fy: z.number().positive(),
-      cover: z.number().optional().describe("mm, default 75 BNBC/ACI, 50 IS"), barDia: z.number().optional().describe("mm, default 16"),
+      cover: z.number().optional().describe("mm, default 75 BNBC/ACI, 50 IS (US: in)"), barDia: z.number().optional().describe("mm, default 16 (US: bar number, default 5)"),
       brickAggregate: z.boolean().optional(),
     }),
-    run: (inp) => {
-      const r = designIsolatedFooting(inp);
-      const fb = /Ø(\d+) @ (\d+)/.exec(r.bars);
-      const drawing = fb ? designDrawing(footingDrawing({ side: Math.round(r.side * 1000), depth: r.depth, columnB: inp.columnB, columnD: inp.columnD, bars: { dia: Number(fb[1]), spacing: Number(fb[2]) }, cover: inp.cover ?? (r.code === "IS456" ? 50 : 75), title: `FOOTING ${r.side} x ${r.side} m (${r.code})` })) : undefined;
-      return { result: r, display: { kind: "steps", title: `Isolated footing ${r.side}×${r.side} m (${r.code})`, steps: r.steps, checks: r.checks }, drawing, summary: `${r.code}: ${r.side} × ${r.side} m × ${r.depth} mm; ${r.bars}` }; },
+    run: (inp0) => {
+      const { si: inp, note, us } = fromUS(inp0, { columnB: "in", columnD: "in", serviceLoad: "kip", deadLoad: "kip", liveLoad: "kip", safeBearingCapacity: "ksf", fck: "psi", fy: "ksi", cover: "in" });
+      const r = designIsolatedFooting({ ...inp, barSystem: us ? "US" : "metric" });
+      const fb = /(?:Ø(\d+(?:\.\d+)?)|#(\d+)) @ (\d+)/.exec(r.bars);
+      const fbDia = fb ? (fb[1] ? Number(fb[1]) : ({ 3: 9.525, 4: 12.7, 5: 15.875, 6: 19.05, 7: 22.225, 8: 25.4, 9: 28.65, 10: 32.26, 11: 35.81 } as Record<string, number>)[fb[2]]) : undefined;
+      let dwg = fb && fbDia ? footingDrawing({ side: Math.round(r.side * 1000), depth: r.depth, columnB: inp.columnB, columnD: inp.columnD, bars: { dia: fbDia, spacing: Number(fb[3]) }, cover: inp.cover ?? (r.code === "IS456" ? 50 : 75), title: `FOOTING ${us ? `${feetInches((r.side * 1000) / 25.4)} SQUARE` : `${r.side} x ${r.side} m`} (${r.code})` }) : undefined;
+      if (dwg && us) dwg = drawingToInches(dwg);
+      const summary = us ? `${r.code}: ${feetInches((r.side * 1000) / 25.4)} square × ${inch(r.depth, 1)} deep (${r.side} m × ${r.depth} mm); ${usLabel(r.bars)}` : `${r.code}: ${r.side} × ${r.side} m × ${r.depth} mm; ${r.bars}`;
+      return { result: r, display: { kind: "steps", title: `Isolated footing ${r.side}×${r.side} m (${r.code})`, steps: [...(note ? [note] : []), ...r.steps], checks: r.checks }, drawing: dwg ? designDrawing(dwg) : undefined, summary };
+    },
   }),
   def({
     name: "design_steel_beam",
     category: "design",
     description: "Select or check a rolled steel I-section (ISMB per IS 808:2021, or AISC W-shape) for a simply supported beam or cantilever per IS 800:2007 or AISC 360-16 (LRFD): bending with lateral-torsional buckling when the compression flange is unbraced (give unbracedLength), section class, web shear with high-shear reduction, and deflection. Units m, kN, kN/m, kN·m, MPa.",
-    schema: z.object({ code: z.enum(["IS800", "AISC"]).default("IS800"), span: z.number().positive(), support: z.enum(["simply_supported", "cantilever"]).default("simply_supported"), factoredUDL: z.number().optional().describe("kN/m"), factoredPointLoad: z.number().optional().describe("kN at midspan (SS) or at the tip (cantilever)"), serviceUDL: z.number().optional().describe("kN/m unfactored, for deflection"), servicePointLoad: z.number().optional().describe("kN unfactored, for deflection"), factoredMoment: z.number().optional().describe("kN·m, overrides loads"), fy: z.number().optional(), section: z.string().optional().describe(`check a specific section, e.g. ${SECTIONS.slice(0, 3).map((s) => s.name).join(", ")}`), deflectionLimit: z.number().optional().describe("span/N, default 300 SS or 150 cantilever") , unbracedLength: z.number().positive().optional().describe("m, laterally unbraced length of the compression flange; omit if continuously restrained"), momentFactor: z.number().positive().optional().describe("c1 (IS 800 Annex E) or Cb (AISC) for the moment diagram, default 1.0")}),
-    run: (inp) => { const r = designSteelBeam(inp); return { result: r, display: { kind: "table", title: `Steel beam candidates (${r.support}, Mu = ${r.Mu.toFixed(1)} kN·m, Vu = ${r.Vu.toFixed(1)} kN)`, columns: ["Section", "Class", "Mass kg/m", "Md kN·m", "Bending util.", "Vd kN", "Shear util.", "Deflection mm", "Limit mm", "OK"], rows: r.candidates.map((c) => [c.section, c.sectionClass, c.mass.toFixed(1), c.momentCapacity.toFixed(1), c.utilization.toFixed(2), c.shearCapacity.toFixed(0), c.shearUtilization.toFixed(2), c.deflection?.toFixed(1) ?? "-", c.deflectionLimit.toFixed(1), c.ok ? "✓" : "✗"]) }, summary: r.recommended ? `Use ${r.recommended.section} (bending ${(r.recommended.utilization * 100).toFixed(0)}%, shear ${(r.recommended.shearUtilization * 100).toFixed(0)}%${r.recommended.deflection !== undefined ? `, deflection ${r.recommended.deflection.toFixed(1)} mm ≤ ${r.recommended.deflectionLimit.toFixed(1)} mm` : ""})` : inp.section ? `${r.candidates[0]?.section}: ${r.candidates[0]?.ok ? "OK" : `FAILS: bending util ${(r.candidates[0]!.utilization * 100).toFixed(0)}%, shear util ${(r.candidates[0]!.shearUtilization * 100).toFixed(0)}%${r.candidates[0]?.deflection !== undefined ? `, deflection ${r.candidates[0]!.deflection!.toFixed(1)} mm vs limit ${r.candidates[0]!.deflectionLimit.toFixed(1)} mm` : ""}`}` : "No section in the table works. Increase depth or use a built-up section." }; },
+    schema: z.object({ units: UNITS_FIELD, code: z.enum(["IS800", "AISC"]).default("IS800"), span: z.number().positive().describe("m (US: ft)"), support: z.enum(["simply_supported", "cantilever"]).default("simply_supported"), factoredUDL: z.number().optional().describe("kN/m"), factoredPointLoad: z.number().optional().describe("kN at midspan (SS) or at the tip (cantilever)"), serviceUDL: z.number().optional().describe("kN/m unfactored, for deflection"), servicePointLoad: z.number().optional().describe("kN unfactored, for deflection"), factoredMoment: z.number().optional().describe("kN·m, overrides loads"), fy: z.number().optional(), section: z.string().optional().describe(`check a specific section, e.g. ${SECTIONS.slice(0, 3).map((s) => s.name).join(", ")}`), deflectionLimit: z.number().optional().describe("span/N, default 300 SS or 150 cantilever") , unbracedLength: z.number().positive().optional().describe("m, laterally unbraced length of the compression flange; omit if continuously restrained"), momentFactor: z.number().positive().optional().describe("c1 (IS 800 Annex E) or Cb (AISC) for the moment diagram, default 1.0")}),
+    run: (inp0) => {
+      const { si: inp, note, us } = fromUS(inp0, { span: "ft", factoredUDL: "klf", factoredPointLoad: "kip", serviceUDL: "klf", servicePointLoad: "kip", factoredMoment: "kipft", fy: "ksi", unbracedLength: "ft" });
+      const r = designSteelBeam(inp);
+      const cols = us ? ["Section", "Class", "Weight lb/ft", "φMn kip-ft", "Bending util.", "φVn kip", "Shear util.", "Deflection in", "Limit in", "OK"] : ["Section", "Class", "Mass kg/m", "Md kN·m", "Bending util.", "Vd kN", "Shear util.", "Deflection mm", "Limit mm", "OK"];
+      const rows = r.candidates.map((c) => us
+        ? [c.section, c.sectionClass, (c.mass * 0.67197).toFixed(1), (c.momentCapacity / 1.355818).toFixed(1), c.utilization.toFixed(2), (c.shearCapacity / 4.448222).toFixed(1), c.shearUtilization.toFixed(2), c.deflection !== undefined ? (c.deflection / 25.4).toFixed(2) : "-", (c.deflectionLimit / 25.4).toFixed(2), c.ok ? "✓" : "✗"]
+        : [c.section, c.sectionClass, c.mass.toFixed(1), c.momentCapacity.toFixed(1), c.utilization.toFixed(2), c.shearCapacity.toFixed(0), c.shearUtilization.toFixed(2), c.deflection?.toFixed(1) ?? "-", c.deflectionLimit.toFixed(1), c.ok ? "✓" : "✗"]);
+      const rec = r.recommended, one = r.candidates[0];
+      const defl = (c: typeof one) => (c.deflection !== undefined ? `, deflection ${us ? `${(c.deflection / 25.4).toFixed(2)} in ≤ ${(c.deflectionLimit / 25.4).toFixed(2)} in` : `${c.deflection.toFixed(1)} mm ≤ ${c.deflectionLimit.toFixed(1)} mm`}` : "");
+      const summary = rec ? `Use ${rec.section} (bending ${(rec.utilization * 100).toFixed(0)}%, shear ${(rec.shearUtilization * 100).toFixed(0)}%${defl(rec)})` : inp.section && one ? `${one.section}: ${one.ok ? "OK" : `FAILS: bending util ${(one.utilization * 100).toFixed(0)}%, shear util ${(one.shearUtilization * 100).toFixed(0)}%${defl(one)}`}` : "No section in the table works. Increase depth or use a built-up section.";
+      return { result: r, display: { kind: "table", title: `Steel beam candidates (${r.support}, Mu = ${us ? kipft(r.Mu) : `${r.Mu.toFixed(1)} kN·m`}, Vu = ${us ? `${(r.Vu / 4.448222).toFixed(1)} kip` : `${r.Vu.toFixed(1)} kN`})${note ? ` · ${note}` : ""}`, columns: cols, rows }, summary };
+    },
   }),
   def({
     name: "bearing_capacity",
     category: "geotech",
     description: "Ultimate and safe bearing capacity of a shallow footing (strip/square/circular/rectangular), Terzaghi (default) or IS 6403 method, general or local shear, with water table and (IS 6403) load inclination. FS default 3 (BNBC 2020 allows 2–3). Units kPa, degrees, kN/m³, m. Bearing capacity alone does not limit settlement: also run the settlement tool.",
     schema: z.object({
+      units: UNITS_FIELD,
       cohesion: z.number().nonnegative().describe("kPa"), frictionAngle: z.number().min(0).max(50).describe("degrees"),
       unitWeight: z.number().positive().describe("kN/m³ above the water table"), saturatedUnitWeight: z.number().positive().optional().describe("kN/m³ below the water table"),
       depth: z.number().nonnegative().describe("founding depth m"), width: z.number().positive().describe("m"), length: z.number().optional(),
@@ -201,7 +291,12 @@ export const TOOLS: ToolDef[] = [
       factorOfSafety: z.number().optional(), method: z.enum(["terzaghi", "is6403"]).optional(), shearMode: z.enum(["general", "local"]).optional().describe("local for loose sand / soft clay"),
       loadInclination: z.number().optional().describe("degrees from vertical (IS 6403)"),
     }),
-    run: (inp) => { const r = bearingCapacity(inp); return { result: r, display: { kind: "steps", title: `${r.method} bearing capacity`, steps: [...r.steps, ...r.notes] }, summary: `${r.method}: net ultimate ${r.netUltimate.toFixed(0)} kPa; net safe ${r.netSafe.toFixed(0)} kPa, gross safe ${r.safe.toFixed(0)} kPa (FS ${r.factorOfSafety})` }; },
+    run: (inp0) => {
+      const { si: inp, note, us } = fromUS(inp0, { cohesion: "psf", unitWeight: "pcf", saturatedUnitWeight: "pcf", depth: "ft", width: "ft", length: "ft", waterTableDepth: "ft" });
+      const r = bearingCapacity(inp);
+      const p = (kPa: number) => (us ? `${(kPa / 47.8803).toFixed(2)} ksf (${kPa.toFixed(0)} kPa)` : `${kPa.toFixed(0)} kPa`);
+      return { result: r, display: { kind: "steps", title: `${r.method} bearing capacity`, steps: [...(note ? [note] : []), ...r.steps, ...r.notes] }, summary: `${r.method}: net ultimate ${p(r.netUltimate)}; net safe ${p(r.netSafe)}, gross safe ${p(r.safe)} (FS ${r.factorOfSafety})` };
+    },
   }),
   def({
     name: "settlement",
@@ -240,8 +335,14 @@ export const TOOLS: ToolDef[] = [
     name: "earth_pressure",
     category: "geotech",
     description: "Rankine active and passive earth pressure on a vertical wall: coefficients, resultant force and its height above the base, with surcharge, cohesion (tension crack) and a water table. Units kPa, kN/m³, m, degrees.",
-    schema: z.object({ frictionAngle: z.number(), height: z.number().positive().describe("m"), unitWeight: z.number().positive().describe("kN/m³ above the water table"), saturatedUnitWeight: z.number().positive().optional(), surcharge: z.number().default(0).describe("kPa"), cohesion: z.number().default(0).describe("kPa"), waterTableDepth: z.number().optional().describe("m below the top of the wall") }),
-    run: (inp) => { const r = earthPressure(inp.frictionAngle, inp.height, inp.unitWeight, inp.surcharge, inp.cohesion, { saturatedUnitWeight: inp.saturatedUnitWeight, waterTableDepth: inp.waterTableDepth }); return { result: r, summary: `Ka = ${r.Ka.toFixed(3)}; active thrust Pa = ${r.activeForce.toFixed(1)} kN/m acting ${r.activeArm.toFixed(2)} m above the base${r.tensionCrackDepth ? `; tension crack ${r.tensionCrackDepth.toFixed(2)} m` : ""}` }; },
+    schema: z.object({ units: UNITS_FIELD, frictionAngle: z.number(), height: z.number().positive().describe("m (US: ft)"), unitWeight: z.number().positive().describe("kN/m³ above the water table"), saturatedUnitWeight: z.number().positive().optional(), surcharge: z.number().default(0).describe("kPa"), cohesion: z.number().default(0).describe("kPa"), waterTableDepth: z.number().optional().describe("m below the top of the wall") }),
+    run: (inp0) => {
+      const { si: inp, note, us } = fromUS(inp0, { height: "ft", unitWeight: "pcf", saturatedUnitWeight: "pcf", surcharge: "psf", cohesion: "psf", waterTableDepth: "ft" });
+      const r = earthPressure(inp.frictionAngle, inp.height, inp.unitWeight, inp.surcharge, inp.cohesion, { saturatedUnitWeight: inp.saturatedUnitWeight, waterTableDepth: inp.waterTableDepth });
+      const F = (kNm: number) => (us ? `${(kNm / 14.5939).toFixed(2)} kip/ft (${kNm.toFixed(1)} kN/m)` : `${kNm.toFixed(1)} kN/m`);
+      const L = (m: number) => (us ? `${(m / 0.3048).toFixed(2)} ft` : `${m.toFixed(2)} m`);
+      return { result: { ...r, conversion: note ?? undefined }, summary: `Ka = ${r.Ka.toFixed(3)}; active thrust Pa = ${F(r.activeForce)} acting ${L(r.activeArm)} above the base${r.tensionCrackDepth ? `; tension crack ${L(r.tensionCrackDepth)}` : ""}` };
+    },
   }),
 
   def({
@@ -601,7 +702,7 @@ export const TOOL_MAP = new Map(TOOLS.map((t) => [t.name, t]));
 /** Always-available small tools. */
 const CORE_TOOLS = ["calculate", "convert_units", "search_code_clauses"];
 const TOOL_GROUPS: { keys: RegExp; tools: string[] }[] = [
-  { keys: /\b(beam|girder|lintel|joist|purlin|udl|point load|bending|shear|deflect|moment|cantilever|span)\b|বিম|বীম/i, tools: ["analyze_beam", "design_rc_beam", "design_steel_beam", "draw_beam_section", "draw_beam_elevation"] },
+  { keys: /\b(beam|girder|lintel|joist|purlin|udl|point load|bending|shear|deflect|moment|cantilever|span|capacity|flexural|mn|φmn|phi ?mn)\b|বিম|বীম/i, tools: ["analyze_beam", "design_rc_beam", "rc_beam_capacity", "design_steel_beam", "draw_beam_section", "draw_beam_elevation"] },
   { keys: /\b(column|pillar|post|axial|strut)\b|কলাম/i, tools: ["design_rc_column", "draw_column_section"] },
   { keys: /\b(slab|floor plate|roof slab|deck)\b|স্ল্যাব|ছাদ/i, tools: ["design_one_way_slab"] },
   { keys: /\b(footing|foundation|soil|bearing|sbc|terzaghi|retaining|earth pressure|pile|settle\w*|consolidat\w*|spt|clay|sand)\b|ফাউন্ডেশন|ফুটিং|পাইল|মাটি/i, tools: ["bearing_capacity", "settlement", "earth_pressure", "design_isolated_footing", "draw_footing"] },

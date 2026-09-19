@@ -7,13 +7,16 @@ import type { ToolOutput } from "@/lib/tools";
 import { useSettings, saveSettings, loadSettings, COUNTRY_PRESETS } from "@/lib/client/settings";
 
 type Region = "BD" | "US";
-/** US starting values. RC, steel and soil calculators take SI inputs: 12 in = 305 mm, 4000 psi = 27.6 MPa, Grade 60 = 420 MPa. */
+/** US starting values in US units (in, ft, psi, ksi, kip, kip-ft, psf, pcf; bars as numbers, 6 = #6). */
 const PRESETS_US: Record<string, Record<string, unknown>> = {
-  design_rc_beam: { code: "ACI318", b: 305, D: 508, fck: 27.6, fy: 420, Mu: 160, Vu: 110, mainBarDia: 20, span: 6.1, support: "one_end_continuous" },
-  design_rc_column: { code: "ACI318", b: 406, D: 406, fck: 27.6, fy: 420, Pu: 1500, Mux: 80, Muy: 30, unsupportedLength: 3658, curvature: "double", endMomentRatio: 0.5 },
-  design_one_way_slab: { code: "ACI318", span: 3.66, liveLoad: 1.92, floorFinish: 0.72, fck: 27.6, fy: 420, cover: 20, support: "one_end_continuous" },
-  design_isolated_footing: { code: "ACI318", columnB: 406, columnD: 406, deadLoad: 700, liveLoad: 350, safeBearingCapacity: 144, fck: 27.6, fy: 420 },
-  design_steel_beam: { code: "AISC", span: 7.3, factoredUDL: 30, serviceUDL: 20, unbracedLength: 2.4 },
+  design_rc_beam: { units: "US", code: "ACI318", b: 12, D: 20, fck: 4000, fy: 60, Mu: 118, Vu: 25, mainBarDia: 6, span: 20, support: "one_end_continuous" },
+  rc_beam_capacity: { units: "US", code: "ACI318", b: 12, d: 17.5, bars: { count: 3, dia: 9 }, fck: 4000, fy: 60 },
+  design_rc_column: { units: "US", code: "ACI318", b: 16, D: 16, fck: 4000, fy: 60, Pu: 340, Mux: 60, Muy: 20, unsupportedLength: 12, curvature: "double", endMomentRatio: 0.5 },
+  design_one_way_slab: { units: "US", code: "ACI318", span: 12, liveLoad: 40, floorFinish: 15, fck: 4000, fy: 60, support: "one_end_continuous" },
+  design_isolated_footing: { units: "US", code: "ACI318", columnB: 16, columnD: 16, deadLoad: 150, liveLoad: 80, safeBearingCapacity: 3, fck: 4000, fy: 60 },
+  design_steel_beam: { units: "US", code: "AISC", span: 24, factoredUDL: 2.0, serviceUDL: 1.3, unbracedLength: 8 },
+  bearing_capacity: { units: "US", cohesion: 0, frictionAngle: 30, unitWeight: 115, depth: 5, width: 6, shape: "square", factorOfSafety: 3 },
+  earth_pressure: { units: "US", frictionAngle: 30, height: 12, unitWeight: 120, surcharge: 250 },
   mix_design_aci: { units: "US", code: "ACI318", fc: 4000, slump: 4, nms: 0.75, fm: 2.7, caDryRoddedDensity: 100, caSG: 2.68, faSG: 2.64, caAbsorption: 0.5, faAbsorption: 0.7, caMoisture: 2, faMoisture: 6 },
   plan_building: { plot: { shape: "rectangular", width: 60, depth: 110, units: "ft" }, buildingType: "single_family", storeys: 2, bedrooms: 3, bathrooms: 2, garage: true, dining: true, standard: "IRC2021" },
   stormwater_runoff: { units: "US", areas: [{ label: "Roofs", area: 1.0, C: 0.95 }, { label: "Paved", area: 0.75, C: 0.9 }, { label: "Lawn", area: 1.25, C: 0.2 }], intensity: 4, returnPeriod: 10 },
@@ -56,6 +59,7 @@ const toolLabel = (name: string) => name.replace(/_/g, " ").replace(/\b(rc|boq|s
 const PRESETS: Record<string, Record<string, unknown>> = {
   analyze_beam: { span: 6, support: "simply_supported", loads: [{ type: "udl", magnitude: 20 }], E: 200000, section: { b: 300, h: 500 } },
   design_rc_beam: { code: "BNBC2020", b: 250, D: 450, fck: 25, fy: 500, Mu: 120, Vu: 90, mainBarDia: 16, span: 5, support: "one_end_continuous" },
+  rc_beam_capacity: { code: "BNBC2020", b: 250, d: 400, bars: { count: 3, dia: 16 }, fck: 25, fy: 500 },
   design_rc_column: { code: "BNBC2020", b: 300, D: 400, fck: 25, fy: 500, Pu: 1200, Mux: 60, Muy: 25, unsupportedLength: 3000, curvature: "double", endMomentRatio: 0.5 },
   design_one_way_slab: { code: "BNBC2020", span: 3.5, liveLoad: 2, floorFinish: 1.2, fck: 25, fy: 500, cover: 20, support: "one_end_continuous" },
   design_isolated_footing: { code: "BNBC2020", columnB: 300, columnD: 400, deadLoad: 600, liveLoad: 250, safeBearingCapacity: 150, fck: 25, fy: 500 },
@@ -122,7 +126,7 @@ export default function CalculatorsPage() {
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-muted">Region:</span>
             {(["BD", "US"] as Region[]).map((r) => <button key={r} className={`btn btn-sm ${region === r ? "btn-primary" : ""}`} onClick={() => setRegion(r)}>{r === "BD" ? "Bangladesh (BNBC, RHD, SI)" : "USA (ACI, AISC, AASHTO, US units)"}</button>)}
-            {region === "US" && <span className="text-[11px] text-muted w-full">RC, steel and soil calculators take SI inputs (mm, MPa, kN): 1 in = 25.4 mm, 4000 psi = 27.6 MPa, Grade 60 = 420 MPa, 1 kip = 4.448 kN. The assistant converts US units for you.</span>}
+            {region === "US" && <span className="text-[11px] text-muted w-full">US units: in, ft, psi (f&apos;c), ksi (fy), kip, kip-ft, psf, pcf; bars #3 to #11 are entered as numbers (6 = #6). Drawings download in inches.</span>}
           </div>
           {tool && (
             <>

@@ -82,5 +82,6 @@ export function formatDimText(e: DimensionEntity, units: Drawing["units"]): stri
   if (e.text) return e.text;
   const { length } = dimGeometry(e);
   if (units === "m") return `${(length / 1000).toFixed(2)}`;
+  if (units === "in") { const r = Math.round(length * 2) / 2; const ft = Math.floor(r / 12); const i = r - ft * 12; const f = (x: number) => (x % 1 ? `${Math.floor(x) || ""}${Math.floor(x) ? " " : ""}1/2` : `${x}`); return r >= 48 ? `${ft}'-${f(i)}"` : `${f(r)}"`; }
   return `${Math.round(length)}`;
 }

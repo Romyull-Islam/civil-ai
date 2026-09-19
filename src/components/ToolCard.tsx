@@ -12,7 +12,7 @@ const TITLES: Record<string, string> = {
   masonry_and_finishes: "Quantities", earthwork_volume: "Earthwork volume", convert_units: "Unit conversion", calculate: "Calculation", search_code_clauses: "Code clauses",
   horizontal_curve: "Horizontal curve", curve_radius_superelevation: "Radius & superelevation", sight_distance: "Sight distance", vertical_curve: "Vertical curve", road_cross_section: "Road cross-section",
   pavement_flexible_aashto: "Flexible pavement (AASHTO 1993)", pavement_rigid_aashto: "Rigid pavement (AASHTO 1993)", traffic_esal: "Design traffic (ESAL / msa)", pavement_rhd_catalogue: "Pavement (RHD 2005 catalogue)",
-  mix_design_aci: "Concrete mix design (ACI 211.1)", mix_design_is10262: "Concrete mix design (IS 10262)", stormwater_runoff: "Stormwater runoff", pipe_channel_flow: "Pipe / channel flow", plan_building: "Building plan",
+  rc_beam_capacity: "RC beam flexural capacity", mix_design_aci: "Concrete mix design (ACI 211.1)", mix_design_is10262: "Concrete mix design (IS 10262)", stormwater_runoff: "Stormwater runoff", pipe_channel_flow: "Pipe / channel flow", plan_building: "Building plan",
   cost_estimate: "Cost estimate", project_schedule: "Project schedule (CPM)", settlement: "Settlement",
   draw_beam_section: "Beam section drawing", draw_beam_elevation: "Beam elevation drawing", draw_column_section: "Column section drawing", draw_footing: "Footing drawing", draw_floor_plan: "Floor plan", draw_custom: "Drawing",
 };

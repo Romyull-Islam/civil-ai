@@ -10,6 +10,7 @@
  * Units: mm, MPa, N internally; inputs and outputs in kN and kN·m.
  */
 import { type DesignCode, CODES, ES, beta1, phiTied, isSteelStress, isConcreteStress, concreteModulus } from "./rcCode";
+import { areaOf, nameOf, columnBarSizes, barDia, type BarSystem } from "./rebar";
 
 export interface Bar { x: number; y: number; area: number } // mm from the bottom-left corner
 export interface RectSection { b: number; h: number; bars: Bar[] } // b along x, h along y
@@ -18,14 +19,14 @@ export type Axis = "x" | "y"; // bending about x: compression face at y = h (dep
 export const barArea = (d: number) => (Math.PI * d * d) / 4;
 
 /** Bars around the perimeter: 4 corners plus pairs on opposite faces, shared out by face length. */
-export function perimeterBars(b: number, h: number, count: number, dia: number, clearCover = 40, tieDia = 10): Bar[] {
+export function perimeterBars(b: number, h: number, count: number, dia: number, clearCover = 40, tieDia = 10, sys: BarSystem = "metric"): Bar[] {
   const n = Math.max(4, count - (count % 2));
   const off = clearCover + tieDia + dia / 2;
   const w = b - 2 * off, t = h - 2 * off;
   const pairs = (n - 4) / 2;
   const onH = Math.round((pairs * t) / (w + t)); // extra bars on EACH of the two faces parallel to y (left/right)
   const onB = pairs - onH; // extra bars on EACH of the two faces parallel to x (top/bottom)
-  const a = barArea(dia);
+  const a = areaOf(dia, sys);
   const bars: Bar[] = [];
   const line = (x0: number, y0: number, x1: number, y1: number, k: number) => { for (let i = 1; i <= k; i++) bars.push({ x: x0 + ((x1 - x0) * i) / (k + 1), y: y0 + ((y1 - y0) * i) / (k + 1), area: a }); };
   for (const [x, y] of [[off, off], [b - off, off], [b - off, h - off], [off, h - off]]) bars.push({ x, y, area: a });
@@ -141,6 +142,8 @@ export interface ColumnInput {
   clearCover?: number; // mm, default 40
   tieDia?: number; // mm, default 10
   bars?: { count: number; dia: number }; // check this arrangement; otherwise design one
+  /** metric (default) or US bars #3–#11 (dia given as bar number or mm) */
+  barSystem?: BarSystem;
 }
 
 export interface ColumnCheck { name: string; ok: boolean; detail: string }
@@ -226,15 +229,18 @@ function checkArrangement(inp: ColumnInput, count: number, dia: number): ColumnR
   const code = inp.code;
   const aci = CODES[code].family === "ACI";
   const cover = inp.clearCover ?? 40;
-  const tie = inp.tieDia ?? (dia > 32 ? 12 : 10);
-  const bars = perimeterBars(inp.b, inp.h, count, dia, cover, tie);
+  const sys = inp.barSystem ?? "metric", us = sys === "US";
+  dia = barDia(dia, sys);
+  // ACI 25.7.2.2: #3 ties for longitudinal bars up to #10, #4 for #11 and larger (metric: Ø10 up to Ø32, Ø12 above)
+  const tie = inp.tieDia !== undefined ? barDia(inp.tieDia, sys) : us ? barDia(dia > 33 ? 4 : 3, sys) : dia > 32 ? 12 : 10;
+  const bars = perimeterBars(inp.b, inp.h, count, dia, cover, tie, sys);
   const sec: RectSection = { b: inp.b, h: inp.h, bars };
   const As = bars.reduce((s, b) => s + b.area, 0);
   const Ag = inp.b * inp.h;
   const pct = (100 * As) / Ag;
   const steps: string[] = [];
   const checks: ColumnCheck[] = [];
-  steps.push(`${CODES[code].label}: ${bars.length} × Ø${dia} mm = ${As.toFixed(0)} mm² (${pct.toFixed(2)}% of ${inp.b}×${inp.h} mm)`);
+  steps.push(`${CODES[code].label}: ${bars.length} × ${us ? nameOf(dia, sys) : `Ø${dia} mm`} = ${As.toFixed(0)} mm² (${pct.toFixed(2)}% of ${inp.b}×${inp.h} mm)`);
   // ACI 318-19 10.6.1.1: 1–8%; BNBC 2020 Sec 6.3.9.1: 1–6% (preferably ≤ 4%); IS 456 cl. 26.5.3.1: 0.8–4% practical (6% absolute)
   const minPct = aci ? 1.0 : 0.8, maxPct = code === "ACI318" ? 8.0 : code === "BNBC2020" ? 6.0 : 4.0;
   checks.push({ name: `Steel ${minPct}–${maxPct}%`, ok: pct >= minPct - 1e-9 && pct <= maxPct, detail: `${pct.toFixed(2)}%${pct > 4 && aci ? " (above 4% makes lap splices congested; BNBC prefers ≤ 4%: consider a larger section)" : ""}` });
@@ -291,13 +297,13 @@ function checkArrangement(inp: ColumnInput, count: number, dia: number): ColumnR
     checks.push({ name: "Biaxial interaction ≤ 1", ok: Mcx > 0 && Mcy > 0 && biaxialRatio <= 1, detail: biaxialRatio.toFixed(3) });
   }
   // ties: ACI 25.7.2 (Ø10 for bars ≤ Ø32, Ø12 above; s ≤ 16db, 48dtie, least dimension); IS 26.5.3.2 (≥ φ/4, ≥ 6 mm; s ≤ least dim, 16φ, 300)
-  const tieDia = aci ? (dia > 32 ? 12 : 10) : [8, 10, 12, 16].find((t) => t >= dia / 4) ?? 16;
+  const tieDia = us ? tie : aci ? (dia > 32 ? 12 : 10) : [8, 10, 12, 16].find((t) => t >= dia / 4) ?? 16;
   const s = aci ? Math.min(16 * dia, 48 * tieDia, Math.min(inp.b, inp.h)) : Math.min(Math.min(inp.b, inp.h), 16 * dia, 300);
-  const ties = `Ø${tieDia} ties @ ${Math.floor(s / 5) * 5} mm c/c`;
+  const ties = `${nameOf(tieDia, sys)} ties @ ${Math.floor(s / 5) * 5} mm c/c`;
   steps.push(`Ties: ${ties} (${aci ? "ACI 25.7.2" : "IS 456 cl. 26.5.3.2"})`);
   return {
     code,
-    bars: { count: bars.length, dia, area: As, percent: pct, label: `${bars.length} × Ø${dia} mm` },
+    bars: { count: bars.length, dia, area: As, percent: pct, label: us ? `${bars.length} ${nameOf(dia, sys)}` : `${bars.length} × Ø${dia} mm` },
     ties,
     capacity: { axialMax, Mux: Math.max(0, Mcx), Muy: Math.max(0, Mcy), biaxialRatio },
     designMoments: { x: mx.withMin, y: my.withMin },
@@ -314,7 +320,8 @@ export function designColumn(inp: ColumnInput): ColumnResult {
   if (!(inp.Pu >= 0)) throw new Error("Pu must be zero or positive (compression)");
   if (inp.bars) return checkArrangement(inp, inp.bars.count, inp.bars.dia);
   const options: { count: number; dia: number; area: number }[] = [];
-  for (const dia of [12, 16, 20, 22, 25, 28, 32]) for (const count of [4, 6, 8, 10, 12, 14, 16, 18, 20, 24]) options.push({ count, dia, area: count * barArea(dia) });
+  const sys = inp.barSystem ?? "metric";
+  for (const dia of columnBarSizes(sys)) for (const count of [4, 6, 8, 10, 12, 14, 16, 18, 20, 24]) options.push({ count, dia, area: count * areaOf(dia, sys) });
   options.sort((a, b) => a.area - b.area || a.count - b.count);
   let last: ColumnResult | null = null;
   // Checks that no amount of steel can fix (slenderness limits, buckling, sway). If one fails, report the lightest
