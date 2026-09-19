@@ -15,7 +15,7 @@ export const DEFAULT_PRICE = { in: 3, out: 15 };
 
 /**
  * US$ per 1M tokens (input, output), paid tier. Verified 2026-09-18 from ai.google.dev/gemini-api/docs/pricing,
- * console.groq.com/docs/models and Anthropic's model table. Local/offline models cost nothing.
+ * console.groq.com/docs/models, DeepSeek's pricing page and Anthropic's model table. Local/offline models cost nothing.
  */
 export const MODEL_PRICES: Record<string, { in: number; out: number }> = {
   "gemini/gemini-3.5-flash-lite": { in: 0.3, out: 2.5 },
@@ -25,6 +25,9 @@ export const MODEL_PRICES: Record<string, { in: number; out: number }> = {
   "groq/openai/gpt-oss-20b": { in: 0.075, out: 0.3 },
   "groq/openai/gpt-oss-120b": { in: 0.15, out: 0.6 },
   "groq/qwen/qwen3.8-27b": { in: 0.8, out: 4 },
+  // DeepSeek charges double 01:00-04:00 and 06:00-10:00 UTC on weekdays; we meter at the peak price (api-docs.deepseek.com).
+  "deepseek/deepseek-flash": { in: 0.3, out: 1.2 },
+  "deepseek/deepseek-v4-pro": { in: 1.32, out: 3.96 },
   "anthropic/claude-haiku-4-5": { in: 1, out: 5 },
   "anthropic/claude-sonnet-5": { in: 2, out: 10 },
   "anthropic/claude-opus-5": { in: 5, out: 25 },

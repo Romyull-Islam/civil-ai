@@ -22,8 +22,8 @@ const MAP: Record<string, FriendlyModel> = {
   "anthropic/claude-opus-5": { name: "Claude Opus", tier: "best", blurb: "Most capable; deep multi-step design work", vision: true },
   "openai/gpt-5-nano": { name: "GPT-5 nano", tier: "fast", blurb: "Fast and economical", vision: true },
   "openai/gpt-5-mini": { name: "GPT-5 mini", tier: "smart", blurb: "Balanced reasoning", vision: true },
-  "deepseek/deepseek-chat": { name: "DeepSeek", tier: "smart", blurb: "Economical strong reasoning" },
-  "deepseek/deepseek-reasoner": { name: "DeepSeek Reasoner", tier: "best", blurb: "Deliberate step-by-step reasoning" },
+  "deepseek/deepseek-flash": { name: "DeepSeek Flash", tier: "smart", blurb: "Economical strong reasoning" },
+  "deepseek/deepseek-v4-pro": { name: "DeepSeek Pro", tier: "best", blurb: "Deliberate step-by-step reasoning" },
   "local/qwen3.5-4b": { name: "Offline model (Qwen 3.5 4B)", tier: "fast", blurb: "Runs on this PC, no internet, unlimited", vision: true },
 };
 
