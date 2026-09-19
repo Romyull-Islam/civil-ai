@@ -85,3 +85,24 @@ describe("landscape", () => {
     for (const q of ["how many shrubs for a 100 m2 bed?", "subdivide my 5 bigha land into plots with a 6 m road", "landscaping plan for a housing project", "mulch needed for 500 sq ft at 3 inches", "best trees for my garden"]) expect(checkTopic([{ role: "user", parts: [{ type: "text", text: q }] }], true).action, q).toBe("allow");
   });
 });
+
+describe("Bangladesh private housing project rules (PRLDR 2004, amended 2012/2015, as quoted by RAJUK/BIP)", () => {
+  const tract = { shape: "rectangular" as const, width: 200, depth: 110 };
+  it("access roads must be at least 25 ft (7.62 m); a collector serving several streets 40 ft", () => {
+    const narrow = subdivide({ tract, lotWidth: 10, lotDepth: 20, streetWidth: 7.5, country: "BD" });
+    expect(narrow.checks.find((c) => /25 ft/.test(c.name))?.ok).toBe(false);
+    const ok = subdivide({ tract, lotWidth: 10, lotDepth: 20, streetWidth: 7.62, country: "BD" });
+    expect(ok.checks.find((c) => /25 ft/.test(c.name))?.ok).toBe(true);
+    expect(ok.internalStreets).toBeGreaterThanOrEqual(2);
+    expect(ok.checks.find((c) => /Collector/.test(c.name))?.ok).toBe(false); // 7.62 m < 40 ft (12.19 m)
+  });
+  it("reserves at least 1.7% commercial land along the existing road and checks 350 persons/acre", () => {
+    const r = subdivide({ tract, lotWidth: 10, lotDepth: 20, streetWidth: 7.62, country: "BD", personsPerLot: 20 });
+    expect(r.commercialArea).toBeGreaterThanOrEqual(0.017 * 22000);
+    expect(r.lots.filter((l) => l.commercial).every((l) => l.row === 1)).toBe(true);
+    const acres = 22000 / 4046.8564224;
+    const dens = r.checks.find((c) => /350 persons/.test(c.name))!;
+    expect(dens.ok).toBe((r.lotCount * 20) / acres <= 350);
+    expect(r.notes.some((n) => /20 acres for 20,000 people/.test(n))).toBe(true);
+  });
+});

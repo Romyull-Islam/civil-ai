@@ -8,9 +8,12 @@
  *
  * Checks: minimum lot width, depth and area; block length; share of land in streets; USA fire access
  * (IFC 2024 503.2.1: access roads ≥ 20 ft (6.1 m) unobstructed width; 503.2.5: dead ends longer than 150 ft (45.72 m)
- * need an approved turnaround). Zoning (lot size, setbacks, coverage) and Bangladesh project rules (Private Residential
- * Land Development Rules 2004, amended 2012/2015: road widths, community-facility and open-space shares) are local
- * inputs. Units: m internally (ft converted).
+ * need an approved turnaround). Zoning (lot size, setbacks, coverage) is a local input.
+ * Bangladesh (Private Residential Land Development Rules 2004, amended 2012/2015), as quoted by RAJUK's DAP project
+ * manager (S. N. Haque, BIP World Town Planning Day 2018) and the Journal of the Bangladesh Institute of Planners
+ * (M. Shamsuzzaman, 2014): internal roads primary 80 ft, secondary 60 ft, tertiary 40 ft, access 25 ft (2012
+ * amendment); commercial land ≥ 1.7%; gross residential density ≤ 350 persons/acre; community facilities including
+ * residential access roads 20 acres per 20,000 people (one row of the rules' schedule). Units: m internally.
  */
 import { plotGeometry, type PlotInput, type Pt } from "./plot";
 
@@ -28,8 +31,14 @@ export interface SubdivisionInput {
   maxCoveragePercent?: number;
   maxBlockLength?: number;
   country?: "US" | "BD" | "other";
+  /** Bangladesh private housing project rules (default on for country BD) */
+  bdProjectRules?: boolean;
+  /** people per plot (flats per plot × household size), for the density check */
+  personsPerLot?: number;
+  /** land for shops/markets, taken from the lots along the existing road (Bangladesh rules: at least 1.7%) */
+  commercialPercent?: number;
 }
-export interface Lot { no: number; row: number; frontsOn: string; x: number; y: number; width: number; depth: number; area: number; openSpace: boolean; buildable?: { width: number; depth: number; area: number } }
+export interface Lot { no: number; row: number; frontsOn: string; x: number; y: number; width: number; depth: number; area: number; openSpace: boolean; commercial?: boolean; buildable?: { width: number; depth: number; area: number } }
 export interface StreetStrip { name: string; x: number; y: number; width: number; length: number; vertical: boolean }
 
 const FT = 0.3048;
@@ -111,15 +120,20 @@ export function subdivide(inp: SubdivisionInput) {
   const osTarget = ((inp.openSpacePercent ?? 0) / 100) * tractArea;
   let os = 0;
   for (const lot of [...lots].reverse()) { if (os >= osTarget - 1e-9) break; lot.openSpace = true; os += lot.area; }
+  // Commercial land from the lots along the existing road
+  const bd = inp.bdProjectRules ?? inp.country === "BD";
+  const comPct = inp.commercialPercent ?? (bd ? 1.7 : 0);
+  let com = 0;
+  for (const lot of lots.filter((l) => l.row === 1 && !l.openSpace)) { if (com >= (comPct / 100) * tractArea - 1e-9) break; lot.commercial = true; com += lot.area; }
   // Buildable envelope with setbacks
   if (inp.setbacks) {
     const sb = { front: inp.setbacks.front * k, rear: inp.setbacks.rear * k, side: inp.setbacks.side * k };
     for (const lot of lots) { const bw = lot.width - 2 * sb.side, bd = lot.depth - sb.front - sb.rear; let area = Math.max(0, bw) * Math.max(0, bd); if (inp.maxCoveragePercent) area = Math.min(area, (lot.area * inp.maxCoveragePercent) / 100); lot.buildable = { width: Math.max(0, bw), depth: Math.max(0, bd), area }; }
   }
-  const saleLots = lots.filter((l) => !l.openSpace);
+  const saleLots = lots.filter((l) => !l.openSpace && !l.commercial);
   const lotArea = saleLots.reduce((s, l) => s + l.area, 0);
   const streetArea = streets.reduce((s, st) => s + st.width * st.length, 0);
-  const remnant = Math.max(0, tractArea - lotArea - streetArea - os);
+  const remnant = Math.max(0, tractArea - lotArea - streetArea - os - com);
   const hectares = tractArea / 10000, acres = tractArea / 4046.8564224;
   const internalLength = streets.reduce((s, st) => s + st.length, 0);
   const checks: { name: string; ok: boolean; detail: string }[] = [];
@@ -138,14 +152,29 @@ export function subdivide(inp: SubdivisionInput) {
       checks.push({ name: "Dead-end length (IFC 503.2.5)", ok: longest <= 150 * FT + 1e-6, detail: `internal streets end at the far boundary: ${(longest / FT).toFixed(0)} ft vs 150 ft without a turnaround${longest > 150 * FT ? "; add an approved turnaround (IFC Appendix D where adopted) or connect the far end" : ""}` });
     }
   }
+  if (bd) {
+    const ftm = (f: number) => f * FT;
+    const internal = streets.filter((s) => !s.vertical);
+    checks.push({ name: "Access roads ≥ 25 ft (PRLDR 2004, 2012 amendment)", ok: W >= ftm(25) - 1e-6, detail: `new streets ${(W / FT).toFixed(1)} ft (${W.toFixed(2)} m) vs access road 25 ft (7.62 m)` });
+    if (access !== "none" && internal.length >= 2) checks.push({ name: "Collector ≥ 40 ft (tertiary road)", ok: W >= ftm(40) - 1e-6, detail: `the access street serves ${internal.length} streets: ${(W / FT).toFixed(1)} ft vs tertiary road 40 ft (12.19 m); larger projects also need secondary (60 ft) and primary (80 ft) roads` });
+    checks.push({ name: "Commercial land ≥ 1.7%", ok: com >= 0.017 * tractArea - 1e-6, detail: `${((100 * com) / tractArea).toFixed(2)}% reserved along the existing road` });
+    if (inp.personsPerLot) {
+      const persons = saleLots.length * inp.personsPerLot;
+      checks.push({ name: "Gross density ≤ 350 persons/acre", ok: persons / acres <= 350 + 1e-9, detail: `${persons} persons on ${acres.toFixed(2)} acres = ${(persons / acres).toFixed(0)} persons/acre` });
+      const need = persons * 0.001; // 20 acres per 20,000 people
+      const have = (streetArea + os) / 4046.8564224;
+      notes.push(`Community facilities: the rules' schedule gives 20 acres for 20,000 people (education, health, community, recreation, commercial and residential access roads). Pro rata for ${persons} people that is ${need.toFixed(2)} acres; this layout has ${have.toFixed(2)} acres of streets and open space. The schedule's values for other population sizes must be checked in the rules.`);
+    } else notes.push("Give persons per plot (flats per plot × household size) to check the 350 persons/acre density limit.");
+    notes.push("Bangladesh rule values are as quoted by RAJUK's DAP project manager (BIP 2018) and the Journal of the Bangladesh Institute of Planners (2014); confirm against the gazette of the Private Residential Land Development Rules 2004 (amended 2012, 2015) and the approving authority.");
+  }
   if (access === "none" && n > 0) notes.push("Internal streets run to both side boundaries: they must connect to roads there (or add an access street).");
-  if (inp.country === "BD") notes.push("Bangladesh: check road widths and the land shares for roads, open space and community facilities against the Private Residential Land Development Rules 2004 (amended 2012/2015) and the approving authority (RAJUK/CDA/KDA). Lot sizes are also given in katha (1 katha = 66.89 m²).");
+  if (inp.country === "BD") notes.push("Lot sizes are also given in katha (1 katha = 66.89 m²).");
   notes.push("Yield study: final lot lines follow a boundary survey, road geometry (curves, intersections, turnarounds), drainage and utility easements.");
   return {
     units: u, tract: { area: tractArea, hectares, acres, perimeter: g.perimeter, points: poly },
-    lots, streets, openSpaceArea: os, lotArea, streetArea, remnantArea: remnant,
+    lots, streets, openSpaceArea: os, commercialArea: com, lotArea, streetArea, remnantArea: remnant,
     lotCount: saleLots.length, rows: row, internalStreets: n, streetLength: internalLength,
-    shares: { lots: (100 * lotArea) / tractArea, streets: (100 * streetArea) / tractArea, openSpace: (100 * os) / tractArea, remnant: (100 * remnant) / tractArea },
+    shares: { lots: (100 * lotArea) / tractArea, streets: (100 * streetArea) / tractArea, openSpace: (100 * os) / tractArea, commercial: (100 * com) / tractArea, remnant: (100 * remnant) / tractArea },
     density: { perHectare: saleLots.length / hectares, perAcre: saleLots.length / acres },
     averageLot: lotArea / saleLots.length, checks, notes,
   };

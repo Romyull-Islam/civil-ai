@@ -551,6 +551,8 @@ export const TOOLS: ToolDef[] = [
       setbacks: z.object({ front: z.number().min(0), rear: z.number().min(0), side: z.number().min(0) }).optional(),
       maxCoveragePercent: z.number().min(1).max(100).optional(), maxBlockLength: z.number().positive().optional(),
       country: z.enum(["US", "BD", "other"]).default("BD"),
+      personsPerLot: z.number().positive().optional().describe("people per plot (flats per plot × household size), for the Bangladesh 350 persons/acre density check"),
+      commercialPercent: z.number().min(0).max(30).optional().describe("land for shops along the existing road; Bangladesh rules: at least 1.7% (default for BD)"),
     }),
     run: (inp) => {
       const r = subdivide(inp);
@@ -571,23 +573,23 @@ export const TOOLS: ToolDef[] = [
       }
       for (const l of r.lots) {
         E.push({ type: "polyline", points: rect(l.x, l.y, l.width, l.depth), closed: true, layer: "OUTLINE" });
-        E.push({ type: "text", x: (l.x + l.width / 2) * k, y: (l.y + l.depth / 2 + th / k * 0.6) * k, text: l.openSpace ? "OPEN SPACE" : `LOT ${l.no}`, height: th, align: "center", layer: "TEXT" });
-        if (!l.openSpace) E.push({ type: "text", x: (l.x + l.width / 2) * k, y: (l.y + l.depth / 2 - th / k * 0.9) * k, text: `${A(l.area).toFixed(0)} ${ua}`, height: th * 0.8, align: "center", layer: "TEXT" });
+        E.push({ type: "text", x: (l.x + l.width / 2) * k, y: (l.y + l.depth / 2 + th / k * 0.6) * k, text: l.openSpace ? "OPEN SPACE" : l.commercial ? `COMMERCIAL ${l.no}` : `LOT ${l.no}`, height: th, align: "center", layer: "TEXT" });
+        if (!l.openSpace && !l.commercial) E.push({ type: "text", x: (l.x + l.width / 2) * k, y: (l.y + l.depth / 2 - th / k * 0.9) * k, text: `${A(l.area).toFixed(0)} ${ua}`, height: th * 0.8, align: "center", layer: "TEXT" });
       }
       const W0 = Math.max(...r.tract.points.map((q) => q[0])) * k;
       E.push({ type: "text", x: W0 / 2, y: -th * 2.5, text: "EXISTING ROAD", height: th * 1.3, align: "center", layer: "TEXT" });
       const drawing: DrawingModel = { title: `Subdivision: ${r.lotCount} lots`, units: ft ? "ft" : "mm", layers: DEFAULT_LAYERS, entities: E, notes: r.notes };
       const katha = (m2: number) => (m2 / 66.8901).toFixed(2);
-      const schedule = r.lots.filter((l) => !l.openSpace).map((l) => [l.no, l.row, l.frontsOn, +(l.width * (ft ? 1 / 0.3048 : 1)).toFixed(2), +(l.depth * (ft ? 1 / 0.3048 : 1)).toFixed(2), +A(l.area).toFixed(1), ...(inp.country === "BD" ? [+katha(l.area)] : []), ...(l.buildable ? [+A(l.buildable.area).toFixed(1)] : [])]);
+      const schedule = r.lots.filter((l) => !l.openSpace && !l.commercial).map((l) => [l.no, l.row, l.frontsOn, +(l.width * (ft ? 1 / 0.3048 : 1)).toFixed(2), +(l.depth * (ft ? 1 / 0.3048 : 1)).toFixed(2), +A(l.area).toFixed(1), ...(inp.country === "BD" ? [+katha(l.area)] : []), ...(l.buildable ? [+A(l.buildable.area).toFixed(1)] : [])]);
       const cols = ["Lot", "Row", "Fronts on", `Width ${u}`, `Depth ${u}`, `Area ${ua}`, ...(inp.country === "BD" ? ["Katha"] : []), ...(inp.setbacks ? [`Buildable ${ua}`] : [])];
       const pct = (x: number) => `${x.toFixed(1)}%`;
-      const summaryRows: CellSpec[][] = [["Tract area", +A(r.tract.area).toFixed(0), ua], ["Lots", r.lotCount, ""], ["Average lot", +A(r.averageLot).toFixed(0), ua], ["Lots (share)", +r.shares.lots.toFixed(1), "%"], ["Streets (share)", +r.shares.streets.toFixed(1), "%"], ["Open space (share)", +r.shares.openSpace.toFixed(1), "%"], ["Remnant (share)", +r.shares.remnant.toFixed(1), "%"], ["Density", +(ft ? r.density.perAcre : r.density.perHectare).toFixed(2), ft ? "lots/acre" : "lots/ha"], ["New street length", +(r.streetLength * (ft ? 1 / 0.3048 : 1)).toFixed(0), u]];
+      const summaryRows: CellSpec[][] = [["Tract area", +A(r.tract.area).toFixed(0), ua], ["Lots", r.lotCount, ""], ["Average lot", +A(r.averageLot).toFixed(0), ua], ["Lots (share)", +r.shares.lots.toFixed(1), "%"], ["Streets (share)", +r.shares.streets.toFixed(1), "%"], ["Open space (share)", +r.shares.openSpace.toFixed(1), "%"], ["Commercial (share)", +r.shares.commercial.toFixed(1), "%"], ["Remnant (share)", +r.shares.remnant.toFixed(1), "%"], ["Density", +(ft ? r.density.perAcre : r.density.perHectare).toFixed(2), ft ? "lots/acre" : "lots/ha"], ["New street length", +(r.streetLength * (ft ? 1 / 0.3048 : 1)).toFixed(0), u]];
       const failing = r.checks.filter((c) => !c.ok);
       return {
         result: { lotCount: r.lotCount, rows: r.rows, internalStreets: r.internalStreets, averageLot: r.averageLot, tractArea: r.tract.area, shares: r.shares, density: r.density, streetLength: r.streetLength, openSpaceArea: r.openSpaceArea, checks: r.checks, notes: r.notes, units: "m and m² (converted in the summary)" },
         display: { kind: "drawing", drawing, svg: toSvg(drawing) },
         workbook: { title: "Subdivision lot schedule", sheets: [{ name: "Lots", title: `Lot schedule: ${r.lotCount} lots`, columns: cols.map((h) => ({ header: h, width: h === "Fronts on" ? 16 : 12 })), rows: schedule }, { name: "Summary", columns: [{ header: "Item", width: 22 }, { header: "Value", width: 14 }, { header: "Unit", width: 12 }], rows: summaryRows, notes: [...r.checks.map((c) => `${c.ok ? "OK" : "FAILS"}: ${c.name}: ${c.detail}`), ...r.notes] }] },
-        summary: `${r.lotCount} lots (average ${A(r.averageLot).toFixed(0)} ${ua}${inp.country === "BD" ? `, ${katha(r.averageLot)} katha` : ""}) in ${r.rows} rows with ${r.internalStreets} new street(s); lots ${pct(r.shares.lots)}, streets ${pct(r.shares.streets)}, open space ${pct(r.shares.openSpace)}, remnant ${pct(r.shares.remnant)}; ${ft ? `${r.density.perAcre.toFixed(2)} lots/acre` : `${r.density.perHectare.toFixed(1)} lots/ha`}.${failing.length ? ` Check: ${failing.map((c) => c.name).join("; ")}.` : ""}`,
+        summary: `${r.lotCount} lots (average ${A(r.averageLot).toFixed(0)} ${ua}${inp.country === "BD" ? `, ${katha(r.averageLot)} katha` : ""}) in ${r.rows} rows with ${r.internalStreets} new street(s); lots ${pct(r.shares.lots)}, streets ${pct(r.shares.streets)}, open space ${pct(r.shares.openSpace)}${r.shares.commercial ? `, commercial ${pct(r.shares.commercial)}` : ""}, remnant ${pct(r.shares.remnant)}; ${ft ? `${r.density.perAcre.toFixed(2)} lots/acre` : `${r.density.perHectare.toFixed(1)} lots/ha`}.${failing.length ? ` Check: ${failing.map((c) => c.name).join("; ")}.` : ""}`,
       };
     },
   }),

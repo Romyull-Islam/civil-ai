@@ -298,7 +298,15 @@ The Indian NBC 2016 room sizes are available as an option.
 - **Lots:** each row's usable length is divided equally, so every lot is at least the minimum frontage. Open space is taken from the rows farthest from the road.
 - **Tests:** hand-computed layouts (39, 36 and 34 lots; 50 lots on a 10-acre US tract), plus a check that every lot lies inside an irregular boundary.
 - **US fire access:** IFC 2024 §503.2.1 (20 ft clear width) and §503.2.5 (dead ends longer than 150 ft need a turnaround), both read from the code text.
-- **Local rules are inputs, never assumed:** zoning values, and Bangladesh project rules (Private Residential Land Development Rules 2004), whose numbers could not be verified online.
+- **Local rules:** zoning values are inputs and are never assumed.
+- **Bangladesh private housing projects:** the Private Residential Land Development Rules 2004 (amended 2012, 2015) are checked as quoted by two sources: RAJUK's DAP project manager (BIP, World Town Planning Day 2018) and the Journal of the Bangladesh Institute of Planners (2014). The rules checked:
+  - access roads at least 25 ft;
+  - a collector serving several streets at least 40 ft (tertiary);
+  - commercial land at least 1.7%;
+  - gross density at most 350 persons/acre;
+  - community facilities of 20 acres per 20,000 people, reported for information only.
+
+  The gazette itself could not be obtained online. Please confirm these values against it.
 - **Scope:** this is a yield study. Street curves, intersections, cul-de-sacs, grading and utilities are not laid out.
 
 **Landscape**
