@@ -4,6 +4,34 @@ import { Play } from "lucide-react";
 import { SchemaForm, defaultValues } from "@/components/SchemaForm";
 import { ToolCard } from "@/components/ToolCard";
 import type { ToolOutput } from "@/lib/tools";
+import { useSettings, saveSettings, loadSettings, COUNTRY_PRESETS } from "@/lib/client/settings";
+
+type Region = "BD" | "US";
+/** US starting values. RC, steel and soil calculators take SI inputs: 12 in = 305 mm, 4000 psi = 27.6 MPa, Grade 60 = 420 MPa. */
+const PRESETS_US: Record<string, Record<string, unknown>> = {
+  design_rc_beam: { code: "ACI318", b: 305, D: 508, fck: 27.6, fy: 420, Mu: 160, Vu: 110, mainBarDia: 20, span: 6.1, support: "one_end_continuous" },
+  design_rc_column: { code: "ACI318", b: 406, D: 406, fck: 27.6, fy: 420, Pu: 1500, Mux: 80, Muy: 30, unsupportedLength: 3658, curvature: "double", endMomentRatio: 0.5 },
+  design_one_way_slab: { code: "ACI318", span: 3.66, liveLoad: 1.92, floorFinish: 0.72, fck: 27.6, fy: 420, cover: 20, support: "one_end_continuous" },
+  design_isolated_footing: { code: "ACI318", columnB: 406, columnD: 406, deadLoad: 700, liveLoad: 350, safeBearingCapacity: 144, fck: 27.6, fy: 420 },
+  design_steel_beam: { code: "AISC", span: 7.3, factoredUDL: 30, serviceUDL: 20, unbracedLength: 2.4 },
+  mix_design_aci: { units: "US", code: "ACI318", fc: 4000, slump: 4, nms: 0.75, fm: 2.7, caDryRoddedDensity: 100, caSG: 2.68, faSG: 2.64, caAbsorption: 0.5, faAbsorption: 0.7, caMoisture: 2, faMoisture: 6 },
+  plan_building: { plot: { shape: "rectangular", width: 60, depth: 110, units: "ft" }, buildingType: "single_family", storeys: 2, bedrooms: 3, bathrooms: 2, garage: true, dining: true, standard: "IRC2021" },
+  stormwater_runoff: { units: "US", areas: [{ label: "Roofs", area: 1.0, C: 0.95 }, { label: "Paved", area: 0.75, C: 0.9 }, { label: "Lawn", area: 1.25, C: 0.2 }], intensity: 4, returnPeriod: 10 },
+  pipe_channel_flow: { mode: "size_pipe", units: "US", Q: 9, slope: 0.005, n: 0.013, purpose: "storm" },
+  cost_estimate: { project: "Example: house foundation", currency: "USD", rateSource: "EXAMPLE RATES ONLY: replace with your bids or cost data", overheadPercent: 8, profitPercent: 10, items: [{ description: "Excavation", unit: "cy", quantity: 160, rate: 12, category: "Earthwork" }, { description: "Footing concrete, 4000 psi", unit: "cy", quantity: 50, rate: 185, category: "Concrete" }, { description: "Rebar, Grade 60, placed", unit: "lb", quantity: 7000, rate: 1.1, category: "Reinforcement" }] },
+};
+/** Region-dependent choices every calculator exposes (code, standard, units, weekend, currency). */
+function regionize(schema: Record<string, unknown>, values: Record<string, unknown>, region: Region): Record<string, unknown> {
+  const props = (schema.properties ?? {}) as Record<string, { enum?: unknown[] }>;
+  const out = { ...values };
+  const pick = (k: string, us: string[], bd: string[]) => { const e = props[k]?.enum; if (!e || (values[k] !== undefined && region === "BD")) return; const hit = (region === "US" ? us : bd).find((x) => e.includes(x)); if (hit) out[k] = hit; };
+  pick("code", ["ACI318", "AISC"], ["BNBC2020", "IS800"]);
+  pick("standard", ["AASHTO", "IRC2021"], ["RHD", "BNBC2020"]);
+  pick("units", ["US", "ft"], ["SI", "m"]);
+  pick("weekend", ["sat_sun"], ["fri"]);
+  pick("currency", ["USD"], ["BDT"]);
+  return out;
+}
 
 interface ToolMeta { name: string; category: string; description: string; schema: Record<string, unknown> }
 const CATS: Record<string, string> = { analysis: "Analysis", design: "Design", geotech: "Geotechnical", transport: "Roads & pavements", water: "Water & drainage", materials: "Concrete & materials", quantities: "Quantities & BOQ", management: "Cost & schedule", utility: "Utilities", reference: "Reference", drawing: "Drawings" };
@@ -47,14 +75,26 @@ const PRESETS: Record<string, Record<string, unknown>> = {
   search_code_clauses: { query: "minimum cover", limit: 5 },
 };
 
+/** Starting values for a calculator in a region: that region's example, then its code / standard / units. */
+const seedFor = (t: ToolMeta, r: Region) => regionize(t.schema, r === "US" ? PRESETS_US[t.name] ?? PRESETS[t.name] ?? {} : PRESETS[t.name] ?? {}, r);
+
 export default function CalculatorsPage() {
   const [tools, setTools] = useState<ToolMeta[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [output, setOutput] = useState<(ToolOutput & { error?: string }) | null>(null);
   const [busy, setBusy] = useState(false);
-  const pick = (t: ToolMeta) => { setSelected(t.name); setValues(defaultValues(t.schema as never, PRESETS[t.name] ?? {})); setOutput(null); };
-  useEffect(() => { fetch("/api/tools").then((r) => r.json()).then((t: ToolMeta[]) => { const list = t.filter((x) => x.category !== "drawing" || x.name === "plan_building"); /* draw_* tools are used from the chat */ setTools(list); if (list.length) pick(list[0]); });
+  const settings = useSettings();
+  const region: Region = settings.preferences.country === "US" ? "US" : "BD";
+  const pick = (t: ToolMeta, r: Region = region) => { setSelected(t.name); setValues(defaultValues(t.schema as never, seedFor(t, r))); setOutput(null); };
+  const setRegion = (r: Region) => { saveSettings({ ...settings, preferences: { ...settings.preferences, ...COUNTRY_PRESETS[r] } }); const t = tools.find((x) => x.name === selected); if (t) pick(t, r); };
+  useEffect(() => {
+    fetch("/api/tools").then((r) => r.json()).then((t: ToolMeta[]) => {
+      const list = t.filter((x) => x.category !== "drawing" || x.name === "plan_building"); // draw_* tools are used from the chat
+      setTools(list);
+      const first = list[0];
+      if (first) { setSelected(first.name); setValues(defaultValues(first.schema as never, seedFor(first, loadSettings().preferences.country === "US" ? "US" : "BD"))); }
+    });
   }, []);
   const tool = useMemo(() => tools.find((t) => t.name === selected), [tools, selected]);
   const run = async () => {
@@ -78,6 +118,11 @@ export default function CalculatorsPage() {
         <div className="max-w-4xl mx-auto p-4 grid gap-4">
           <div className="md:hidden">
             <select className="select" value={selected} onChange={(e) => { const t = tools.find((x) => x.name === e.target.value); if (t) pick(t); }}>{Object.entries(grouped).map(([cat, list]) => <optgroup key={cat} label={CATS[cat] ?? cat}>{list.map((t) => <option key={t.name} value={t.name}>{toolLabel(t.name)}</option>)}</optgroup>)}</select>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-muted">Region:</span>
+            {(["BD", "US"] as Region[]).map((r) => <button key={r} className={`btn btn-sm ${region === r ? "btn-primary" : ""}`} onClick={() => setRegion(r)}>{r === "BD" ? "Bangladesh (BNBC, RHD, SI)" : "USA (ACI, AISC, AASHTO, US units)"}</button>)}
+            {region === "US" && <span className="text-[11px] text-muted w-full">RC, steel and soil calculators take SI inputs (mm, MPa, kN): 1 in = 25.4 mm, 4000 psi = 27.6 MPa, Grade 60 = 420 MPa, 1 kip = 4.448 kN. The assistant converts US units for you.</span>}
           </div>
           {tool && (
             <>

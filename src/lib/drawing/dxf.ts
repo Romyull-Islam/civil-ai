@@ -42,6 +42,15 @@ export function hatchLines(h: HatchEntity): [number, number, number, number][] {
   return out;
 }
 
+/**
+ * Text for AutoCAD: R12 DXF text is read in the drawing's ANSI code page, not UTF-8, so "Ø" would appear as "Ã˜".
+ * AutoCAD control codes are used for its symbols (%%c diameter, %%d degree, %%p plus/minus) and \U+XXXX for any other
+ * non-ASCII character (×, ², Bangla room names), which AutoCAD, BricsCAD and ezdxf all read.
+ */
+export function dxfText(s: string): string {
+  return s.replace(/[Øø⌀]/g, "%%c").replace(/°/g, "%%d").replace(/±/g, "%%p").replace(/[^\x00-\x7F]/gu, (ch) => `\\U+${ch.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`);
+}
+
 function entityDxf(e: Entity, units: Drawing["units"], ds: { text: number; tick: number; ext: number } = { text: 2.5, tick: 2, ext: 1.5 }): string {
   const layer = e.layer ?? "0";
   switch (e.type) {
@@ -54,7 +63,7 @@ function entityDxf(e: Entity, units: Drawing["units"], ds: { text: number; tick:
     case "text": {
       const h = e.height ?? 2.5;
       const align = e.align === "center" ? 1 : e.align === "right" ? 2 : 0;
-      let s = pair(0, "TEXT") + pair(8, layer) + pair(10, e.x) + pair(20, e.y) + pair(30, 0) + pair(40, h) + pair(1, e.text) + pair(50, e.rotation ?? 0);
+      let s = pair(0, "TEXT") + pair(8, layer) + pair(10, e.x) + pair(20, e.y) + pair(30, 0) + pair(40, h) + pair(1, dxfText(e.text)) + pair(50, e.rotation ?? 0);
       if (align) s += pair(72, align) + pair(11, e.x) + pair(21, e.y) + pair(31, 0);
       return s;
     }
@@ -95,7 +104,7 @@ function entityDxf(e: Entity, units: Drawing["units"], ds: { text: number; tick:
 export function toDxf(d: Drawing): string {
   const layers = d.layers.length ? d.layers : DEFAULT_LAYERS;
   let s = "";
-  s += pair(0, "SECTION") + pair(2, "HEADER") + pair(9, "$ACADVER") + pair(1, "AC1009") + pair(9, "$INSUNITS") + pair(70, d.units === "mm" ? 4 : d.units === "m" ? 6 : d.units === "in" ? 1 : 2) + pair(0, "ENDSEC");
+  s += pair(0, "SECTION") + pair(2, "HEADER") + pair(9, "$ACADVER") + pair(1, "AC1009") + pair(9, "$DWGCODEPAGE") + pair(3, "ANSI_1252") + pair(9, "$INSUNITS") + pair(70, d.units === "mm" ? 4 : d.units === "m" ? 6 : d.units === "in" ? 1 : 2) + pair(0, "ENDSEC");
   s += pair(0, "SECTION") + pair(2, "TABLES");
   s += pair(0, "TABLE") + pair(2, "LAYER") + pair(70, layers.length);
   for (const l of layers) s += pair(0, "LAYER") + pair(2, l.name) + pair(70, 0) + pair(62, l.color ?? 7) + pair(6, "CONTINUOUS");

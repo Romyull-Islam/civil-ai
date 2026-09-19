@@ -51,6 +51,7 @@ export function ToolCard({ name, args, output, pending }: { name: string; args: 
       {output?.summary && !output.error && <div className="px-3 py-2 text-fg">{output.summary}</div>}
       {d?.kind === "beam" && <div className="px-3 pb-3"><BeamChart result={d.result} /></div>}
       {d?.kind === "drawing" && <div className="p-3"><DrawingViewer drawing={d.drawing} svg={d.svg} /></div>}
+      {output?.drawing && !output.error && <div className="p-3 border-t border-border"><div className="label mb-1">Drawing (download DXF for AutoCAD)</div><DrawingViewer drawing={output.drawing.drawing} svg={output.drawing.svg} /></div>}
       {d?.kind === "table" && (
         <div className="px-3 pb-3 overflow-x-auto">
           {d.title && <div className="label mb-1">{d.title}</div>}

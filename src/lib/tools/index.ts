@@ -34,7 +34,11 @@ export type Display =
   | { kind: "steps"; title?: string; steps: string[]; checks?: { name: string; ok: boolean; detail: string }[] };
 
 /** workbook: an Excel spec the chat offers as a download (sent to the browser only, never to the model). */
-export interface ToolOutput { result: unknown; display?: Display; summary?: string; workbook?: WorkbookSpec }
+export interface ToolOutput { result: unknown; display?: Display; summary?: string; workbook?: WorkbookSpec; drawing?: { drawing: Drawing; svg: string } }
+
+/** Drawing of a designed member, attached to design results so the DXF can be opened in AutoCAD straight away. */
+const designDrawing = (d: Drawing) => ({ drawing: d, svg: toSvg(d) });
+const num = (label: string | undefined, re: RegExp) => { const m = label ? re.exec(label) : null; return m ? Number(m[1]) : undefined; };
 
 export interface ToolDef<S extends z.ZodTypeAny = z.ZodTypeAny> {
   name: string;
@@ -110,7 +114,10 @@ export const TOOLS: ToolDef[] = [
     run: (inp) => {
       const r = designRcBeam(inp);
       const summary = `${r.code}: As = ${r.AstRequired.toFixed(0)} mm² → ${r.tensionBars[0]?.label ?? "increase section"}${r.AscRequired > 0 ? `; compression steel ${r.AscRequired.toFixed(0)} mm² → ${r.compressionBars?.[0]?.label ?? ""}` : ""}${r.shear ? `; ${r.shear.stirrupLabel}` : ""}`;
-      return { result: r, display: { kind: "steps", title: `RC beam ${inp.b}×${inp.D} (${r.code})`, steps: r.steps, checks: r.checks }, summary };
+      const tb = r.tensionBars[0], cb = r.compressionBars?.[0];
+      const sDia = num(r.shear?.stirrupLabel, /Ø(\d+)/);
+      const drawing = tb ? designDrawing(beamSection({ b: inp.b, D: inp.D, cover: inp.cover ?? (r.code === "IS456" ? 25 : 40), bottomBars: { count: tb.count, dia: tb.diameter }, topBars: cb ? { count: cb.count, dia: cb.diameter } : { count: 2, dia: 12 }, stirrup: r.shear && sDia ? { dia: sDia, spacing: r.shear.stirrupSpacing } : undefined, title: `RC BEAM ${inp.b} x ${inp.D} (${r.code})`, notes: [`Bottom: ${tb.label}`, cb ? `Top: ${cb.label} (compression steel)` : "Top: 2 × Ø12 hanger bars (nominal, not designed)", ...(r.shear ? [`Stirrups: ${r.shear.stirrupLabel}`] : []), "Preliminary design: check and detail per the applicable code."] })) : undefined;
+      return { result: r, display: { kind: "steps", title: `RC beam ${inp.b}×${inp.D} (${r.code})`, steps: r.steps, checks: r.checks }, drawing, summary };
     },
   }),
   def({
@@ -135,7 +142,9 @@ export const TOOLS: ToolDef[] = [
     run: (inp) => {
       const r = designColumn({ code: inp.code, b: inp.b, h: inp.D, fc: inp.fck, fy: inp.fy, Pu: inp.Pu, Mux: inp.Mux, Muy: inp.Muy, lu: inp.unsupportedLength, k: inp.k, braced: inp.braced, endMomentRatio: inp.endMomentRatio, curvature: inp.curvature, bars: inp.bars, clearCover: inp.clearCover });
       const { curve: _c, ...rest } = r; void _c;
-      return { result: { ...rest, AscRequired: r.bars.area, steelPercent: r.bars.percent }, display: { kind: "steps", title: `RC column ${inp.b}×${inp.D} (${r.code})`, steps: r.steps, checks: r.checks }, summary: `${r.code}: ${r.bars.label} (${r.bars.area.toFixed(0)} mm², ${r.bars.percent.toFixed(2)}%), ${r.ties}; ${r.ok ? "all checks pass" : "CHECKS FAIL: " + r.checks.filter((c) => !c.ok).map((c) => c.name).join(", ")}` };
+      const tie = /Ø(\d+) ties @ (\d+)/.exec(r.ties ?? "");
+      const drawing = designDrawing(columnSection({ b: inp.b, D: inp.D, cover: inp.clearCover ?? 40, bars: { count: r.bars.count, dia: r.bars.dia }, tie: tie ? { dia: Number(tie[1]), spacing: Number(tie[2]) } : undefined, title: `RC COLUMN ${inp.b} x ${inp.D} (${r.code})` }));
+      return { result: { ...rest, AscRequired: r.bars.area, steelPercent: r.bars.percent }, display: { kind: "steps", title: `RC column ${inp.b}×${inp.D} (${r.code})`, steps: r.steps, checks: r.checks }, drawing, summary: `${r.code}: ${r.bars.label} (${r.bars.area.toFixed(0)} mm², ${r.bars.percent.toFixed(2)}%), ${r.ties}; ${r.ok ? "all checks pass" : "CHECKS FAIL: " + r.checks.filter((c) => !c.ok).map((c) => c.name).join(", ")}` };
     },
   }),
   def({
@@ -167,7 +176,11 @@ export const TOOLS: ToolDef[] = [
       cover: z.number().optional().describe("mm, default 75 BNBC/ACI, 50 IS"), barDia: z.number().optional().describe("mm, default 16"),
       brickAggregate: z.boolean().optional(),
     }),
-    run: (inp) => { const r = designIsolatedFooting(inp); return { result: r, display: { kind: "steps", title: `Isolated footing ${r.side}×${r.side} m (${r.code})`, steps: r.steps, checks: r.checks }, summary: `${r.code}: ${r.side} × ${r.side} m × ${r.depth} mm; ${r.bars}` }; },
+    run: (inp) => {
+      const r = designIsolatedFooting(inp);
+      const fb = /Ø(\d+) @ (\d+)/.exec(r.bars);
+      const drawing = fb ? designDrawing(footingDrawing({ side: Math.round(r.side * 1000), depth: r.depth, columnB: inp.columnB, columnD: inp.columnD, bars: { dia: Number(fb[1]), spacing: Number(fb[2]) }, cover: inp.cover ?? (r.code === "IS456" ? 50 : 75), title: `FOOTING ${r.side} x ${r.side} m (${r.code})` })) : undefined;
+      return { result: r, display: { kind: "steps", title: `Isolated footing ${r.side}×${r.side} m (${r.code})`, steps: r.steps, checks: r.checks }, drawing, summary: `${r.code}: ${r.side} × ${r.side} m × ${r.depth} mm; ${r.bars}` }; },
   }),
   def({
     name: "design_steel_beam",
