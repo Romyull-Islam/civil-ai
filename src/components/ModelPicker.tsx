@@ -7,6 +7,7 @@ import { friendlyModel, TIER_LABEL, type Tier } from "@/lib/ai/friendly";
 import { PROVIDERS } from "@/lib/ai/registry";
 import { useSession } from "@/lib/client/session";
 import { estimateCredits } from "@/lib/saas/credits";
+import { UsageBars } from "./UsageBars";
 
 /** Compact provider/model switcher shown under the chat box. Same settings as the Settings page. */
 export function ModelPicker() {
@@ -78,7 +79,7 @@ function PlanModelChooser() {
       <button className="flex items-center gap-1.5 rounded-lg px-2 py-1 hover:bg-elev2 text-fg" onClick={() => setOpen((v) => !v)} title="Choose model">
         <Sparkles size={13} className="text-accent" /> {curName} <ChevronDown size={13} className={`transition ${open ? "rotate-180" : ""}`} />
       </button>
-      {session?.usage?.remaining != null && <span className="hidden sm:inline" title={`Today ${session.usage.used} of ${session.usage.limit} credits · this period ${session.usage.periodUsed} of ${session.usage.periodLimit}`}>{session.usage.remaining} credits left</span>}
+      {session?.usage?.remaining != null && <Link href="/account#usage" className="hidden sm:inline hover:text-fg" title="Session, weekly and monthly usage">{session.usage.remaining} credits left</Link>}
       {open && (
         <div className="absolute bottom-full left-0 mb-2 w-80 max-h-[60vh] overflow-y-auto card p-1 shadow-xl z-50 text-sm">
           <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-elev2 flex gap-2" onClick={() => pick("auto")}>
@@ -92,6 +93,7 @@ function PlanModelChooser() {
               <div className="flex-1 min-w-0"><div className="font-medium flex items-center gap-2">{f.name}<span className={`badge ${TIER_STYLE[f.tier]}`}>{TIER_LABEL[f.tier]}</span>{f.vision && <Eye size={13} className="text-muted" aria-label="reads images" />}<span className="ml-auto text-[11px] text-muted font-normal">≈{creditLabel(m.provider, m.model)}</span></div>{f.blurb && <div className="text-xs text-muted">{f.blurb}</div>}</div>
               {active && <Check size={16} className="text-ok shrink-0" />}
             </button>); })}
+          {session?.usage && session.usage.remaining !== null && <div className="border-t border-border mt-1 px-3 py-2"><UsageBars usage={session.usage} compact /></div>}
           {locked.length > 0 && (
             <>
               <div className="label px-3 pt-2 pb-1">More with an upgrade</div>

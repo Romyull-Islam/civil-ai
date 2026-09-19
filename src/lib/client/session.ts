@@ -1,22 +1,25 @@
 "use client";
 import { useEffect, useState } from "react";
 
+export interface Allowance { used: number; limit: number | null; resetsAt: number | null }
+export interface UsageInfo { remaining: number | null; blockedBy: "session" | "week" | "period" | null; session: Allowance; week: Allowance; period: Allowance & { start: string }; sessionHours: number }
+
 export interface SessionInfo {
   mode: "saas" | "byok" | "desktop";
   user: { id: string; email: string; name: string; role: "superadmin" | "admin" | "support" | "user"; plan: string; planExpires: number | null; emailVerified: number } | null;
-  plan?: { id: string; name: string; monthlyCredits: number; dailyCredits: number; features: string[]; vision: boolean; localAI?: boolean };
+  plan?: { id: string; name: string; monthlyCredits: number; weeklyCredits: number; sessionCredits: number; sessionHours?: number; features: string[]; vision: boolean; localAI?: boolean };
   allowedModels?: { provider: string; model: string }[];
   upgradeModels?: { provider: string; model: string; plan: string; planId: string }[];
-  /** AI credits: used/limit are today's, periodUsed/periodLimit the billing period's; remaining is what can be spent now */
-  usage?: { used: number; limit: number | null; remaining: number | null; periodUsed?: number; periodLimit?: number | null; periodStart?: string };
+  /** AI credits: what can be spent now, and each allowance (limit null = unlimited; resetsAt epoch ms, null = session not started) */
+  usage?: UsageInfo;
   renewal?: { status: "none" | "ok" | "expiring" | "grace" | "expired"; daysLeft: number | null };
-  plans?: { id: string; name: string; priceMonthly: number; currency: string; monthlyCredits: number; dailyCredits: number; features: string[]; perSeat?: boolean; minSeats?: number }[];
+  plans?: { id: string; name: string; priceMonthly: number; currency: string; monthlyCredits: number; weeklyCredits: number; sessionCredits: number; sessionHours?: number; features: string[]; perSeat?: boolean; minSeats?: number }[];
   inTeam?: boolean;
   avatar?: string;
   /** SaaS: cloud backup quota (desktop/byok reuse `cloud` for the linked account instead) */
   cloudQuota?: { limitBytes: number; usedBytes: number; maxItems: number; count: number };
   /** desktop/byok: linked hosted account */
-  cloud?: { linked: boolean; backendUrl?: string; email?: string; offline?: boolean; allowedModels?: { provider: string; model: string }[]; plan?: { name: string }; usage?: { used: number; limit: number | null; remaining: number | null } };
+  cloud?: { linked: boolean; backendUrl?: string; email?: string; offline?: boolean; allowedModels?: { provider: string; model: string }[]; plan?: { name: string }; usage?: UsageInfo };
 }
 
 let cache: SessionInfo | null = null;

@@ -10,7 +10,7 @@ export async function GET(req: Request) {
   if (mode !== "saas") return Response.json({ mode, user: null });
   const user = await getSessionUser(req);
   const plans = await getPlans();
-  if (!user) return Response.json({ mode, user: null, plans: plans.map(({ id, name, priceMonthly, currency, monthlyCredits, dailyCredits, features }) => ({ id, name, priceMonthly, currency, monthlyCredits, dailyCredits, features })) });
+  if (!user) return Response.json({ mode, user: null, plans: plans.map(({ id, name, priceMonthly, currency, monthlyCredits, weeklyCredits, sessionCredits, sessionHours, features }) => ({ id, name, priceMonthly, currency, monthlyCredits, weeklyCredits, sessionCredits, sessionHours: sessionHours ?? 5, features })) });
   startRenewalScheduler();
   const q = await quota(user);
   const subscribed = plans.find((p) => p.id === user.plan) ?? q.plan; // renewal state refers to the plan the user paid for, even after it lapsed to Free
@@ -23,5 +23,5 @@ export async function GET(req: Request) {
   const allowedKeys = new Set(planModels(q.plan).map((m) => `${m.provider}/${m.model}`));
   const upgradeModels: { provider: string; model: string; plan: string; planId: string }[] = [];
   for (const p of [...plans].filter((x) => x.priceMonthly > q.plan.priceMonthly).sort((a, b) => a.priceMonthly - b.priceMonthly)) for (const m of planModels(p).filter(usable)) { const k = `${m.provider}/${m.model}`; if (!allowedKeys.has(k)) { allowedKeys.add(k); upgradeModels.push({ ...m, plan: p.name, planId: p.id }); } }
-  return Response.json({ mode, user: publicUser(user), avatar: gravatar(user.email), cloud: { limitBytes: cq.limitBytes, usedBytes: cq.used.bytes, maxItems: cq.maxItems, count: cq.used.count }, plan: q.plan, renewal: renewalState(user, subscribed), allowedModels, upgradeModels, usage: publicUsage(q), plans: plans.map(({ id, name, priceMonthly, currency, monthlyCredits, dailyCredits, features, perSeat, minSeats }) => ({ id, name, priceMonthly, currency, monthlyCredits, dailyCredits, features, perSeat: !!perSeat, minSeats: minSeats ?? 1 })), inTeam: !!(await (await import("@/lib/saas/db")).getDB().then((d) => d.getTeamForUser(user.id))) });
+  return Response.json({ mode, user: publicUser(user), avatar: gravatar(user.email), cloud: { limitBytes: cq.limitBytes, usedBytes: cq.used.bytes, maxItems: cq.maxItems, count: cq.used.count }, plan: q.plan, renewal: renewalState(user, subscribed), allowedModels, upgradeModels, usage: publicUsage(q), plans: plans.map(({ id, name, priceMonthly, currency, monthlyCredits, weeklyCredits, sessionCredits, sessionHours, features, perSeat, minSeats }) => ({ id, name, priceMonthly, currency, monthlyCredits, weeklyCredits, sessionCredits, sessionHours: sessionHours ?? 5, features, perSeat: !!perSeat, minSeats: minSeats ?? 1 })), inTeam: !!(await (await import("@/lib/saas/db")).getDB().then((d) => d.getTeamForUser(user.id))) });
 }

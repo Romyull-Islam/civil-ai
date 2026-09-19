@@ -60,7 +60,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/settings", label: "Settings", icon: Settings, show: true },
     { href: "/pricing", label: "Plans & billing", icon: CreditCard, show: saas },
     { href: "/subscribe", label: session?.plan?.id === "free" ? "Upgrade plan" : "Renew / change plan", icon: Sparkles, show: saas && !!user },
-    { href: "/account", label: "Usage & account", icon: BarChart3, show: saas && !!user },
+    { href: "/account#usage", label: "Usage & account", icon: BarChart3, show: saas && !!user },
     { href: "/saves", label: "Cloud backups", icon: Cloud, show: saas && !!user },
     { href: "/team", label: "Team", icon: Users, show: saas && !!session?.inTeam },
     { href: "/admin", label: user?.role === "support" ? "Helpdesk" : "Admin", icon: Shield, show: !!staff },

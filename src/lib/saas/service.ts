@@ -230,18 +230,20 @@ export async function keyStatus(): Promise<Record<string, { set: boolean; fromEn
 
 // ---------- quotas & usage ----------
 export const today = () => new Date().toISOString().slice(0, 10);
+export interface Allowance { used: number; limit: number; /** epoch ms when this allowance refills; null = session not started */ resetsAt: number | null }
 export interface Quota {
   plan: Plan;
-  /** credits used today (UTC) and the daily budget */
-  used: number;
-  limit: number;
-  /** credits used since the billing period began and the period budget */
-  periodUsed: number;
-  periodLimit: number;
-  periodStart: string;
-  /** what can still be spent now: the smaller of the daily and period allowances */
+  session: Allowance;
+  week: Allowance;
+  period: Allowance & { start: string };
+  /** credits that can still be spent now: the smallest of the three allowances */
   remaining: number;
+  /** which allowance is used up (the one that refills last), or null */
+  blockedBy: "session" | "week" | "period" | null;
 }
+
+const DAY = 86400000;
+const dayMs = (d: string) => Date.parse(`${d}T00:00:00Z`);
 
 /**
  * First day of the current billing period: paid plans run from (expiry − periodDays), so a renewal starts a fresh budget;
@@ -250,32 +252,88 @@ export interface Quota {
 export function periodStartDay(plan: Plan, expires: number | null, now = Date.now()): string {
   const monthStart = new Date(now).toISOString().slice(0, 8) + "01";
   if (!expires || plan.priceMonthly === 0) return monthStart;
-  const start = new Date(Math.min(expires - (plan.periodDays ?? 30) * 86400000, now)).toISOString().slice(0, 10);
-  return start;
+  return new Date(Math.min(expires - (plan.periodDays ?? 30) * DAY, now)).toISOString().slice(0, 10);
 }
 
-export async function quota(user: User): Promise<Quota> {
+/** End of the billing period that starts on `start` (exclusive, epoch ms). */
+export function periodEnd(plan: Plan, start: string, expires: number | null): number {
+  if (!expires || plan.priceMonthly === 0) { const d = new Date(dayMs(start)); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1); }
+  return dayMs(start) + (plan.periodDays ?? 30) * DAY;
+}
+
+/** Weeks are counted from the start of the billing period: days 1–7, 8–14, … (the last one may be shorter). */
+export function weekWindow(periodStart: string, periodEndMs: number, now = Date.now()): { start: number; end: number } {
+  const p0 = dayMs(periodStart);
+  const start = p0 + Math.floor(Math.max(0, now - p0) / (7 * DAY)) * 7 * DAY;
+  return { start, end: Math.min(start + 7 * DAY, periodEndMs) };
+}
+
+const sessionKey = (userId: string) => `usage-session:${userId}`;
+/** Start of the user's current usage session, or null when none is running (the next question starts one). */
+async function activeSessionStart(userId: string, hours: number, now = Date.now()): Promise<number | null> {
+  const v = Number(await (await getDB()).getSetting(sessionKey(userId)));
+  return v && now < v + hours * 3600000 ? v : null;
+}
+
+export async function quota(user: User, now = Date.now()): Promise<Quota> {
   const plan = await planFor(user);
   const db = await getDB();
   const team = await db.getTeamForUser(user.id);
   const expires = team && team.plan === plan.id ? team.expires : user.planExpires;
-  const periodStart = periodStartDay(plan, expires);
-  const [day, period] = await Promise.all([db.getUsage(user.id, today()), db.sumUsage(user.id, periodStart)]);
-  if (isStaff(user.role)) return { plan, used: day.credits, limit: Infinity, periodUsed: period.credits, periodLimit: Infinity, periodStart, remaining: Infinity };
-  const remaining = Math.max(0, Math.min(plan.dailyCredits - day.credits, plan.monthlyCredits - period.credits));
-  return { plan, used: day.credits, limit: plan.dailyCredits, periodUsed: period.credits, periodLimit: plan.monthlyCredits, periodStart, remaining };
+  const pStart = periodStartDay(plan, expires, now);
+  const pEnd = periodEnd(plan, pStart, expires);
+  const week = weekWindow(pStart, pEnd, now);
+  const hours = plan.sessionHours ?? 5;
+  const sStart = await activeSessionStart(user.id, hours, now);
+  const [period, weekUsed, sessionUsed] = await Promise.all([
+    db.sumUsage(user.id, pStart),
+    db.sumUsageEvents(user.id, week.start),
+    sStart ? db.sumUsageEvents(user.id, sStart) : Promise.resolve(0),
+  ]);
+  const staff = isStaff(user.role);
+  const lim = (n: number) => (staff ? Infinity : n);
+  const q: Quota = {
+    plan,
+    session: { used: sessionUsed, limit: lim(plan.sessionCredits), resetsAt: sStart ? sStart + hours * 3600000 : null },
+    week: { used: weekUsed, limit: lim(plan.weeklyCredits), resetsAt: week.end },
+    period: { used: period.credits, limit: lim(plan.monthlyCredits), resetsAt: pEnd, start: pStart },
+    remaining: 0,
+    blockedBy: null,
+  };
+  q.remaining = Math.max(0, Math.min(q.session.limit - q.session.used, q.week.limit - q.week.used, q.period.limit - q.period.used));
+  if (q.remaining <= 0) q.blockedBy = q.period.used >= q.period.limit ? "period" : q.week.used >= q.week.limit ? "week" : "session";
+  return q;
 }
 
 /** Usage summary for the UI (credits rounded to 0.1; staff are unlimited → null limits). */
 export function publicUsage(q: Quota) {
   const r = (n: number) => Math.round(n * 10) / 10;
-  const unlimited = !Number.isFinite(q.limit);
-  return { used: r(q.used), limit: unlimited ? null : q.limit, remaining: unlimited ? null : r(q.remaining), periodUsed: r(q.periodUsed), periodLimit: unlimited ? null : q.periodLimit, periodStart: q.periodStart };
+  const a = (x: Allowance) => ({ used: r(x.used), limit: Number.isFinite(x.limit) ? x.limit : null, resetsAt: x.resetsAt });
+  const unlimited = !Number.isFinite(q.period.limit);
+  return { remaining: unlimited ? null : r(q.remaining), blockedBy: q.blockedBy, session: a(q.session), week: a(q.week), period: { ...a(q.period), start: q.period.start }, sessionHours: q.plan.sessionHours ?? 5 };
+}
+
+/** Human time in Bangladesh, e.g. "Tue 23 Sep, 11:40". */
+export const bdTime = (ms: number) => new Date(ms).toLocaleString("en-GB", { timeZone: "Asia/Dhaka", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+/** The message shown when a user has no credits left, naming the limit and when it refills. */
+export function limitMessage(q: Quota): string {
+  const when = (ms: number | null) => (ms ? bdTime(ms) : "soon");
+  if (q.blockedBy === "period") return `You have used this period's ${q.period.limit} AI credits on the ${q.plan.name} plan. They refill on ${when(q.period.resetsAt)} (Bangladesh time), or upgrade for more. Calculators, drawings and the code library stay available.`;
+  if (q.blockedBy === "week") return `You have reached this week's limit of ${q.week.limit} AI credits on the ${q.plan.name} plan. It refills on ${when(q.week.resetsAt)} (Bangladesh time); your monthly credits are kept. Calculators, drawings and the code library stay available.`;
+  return `You have reached the ${q.session.limit}-credit limit for this ${q.plan.sessionHours ?? 5}-hour session on the ${q.plan.name} plan. A new session starts at ${when(q.session.resetsAt)} (Bangladesh time); your weekly and monthly credits are kept.`;
 }
 
 /** Charge one model call: credits by that model's price and real token use (see credits.ts). `newRequest` counts a user question. */
-export async function recordUsage(userId: string, provider: string, model: string, inputTokens: number, outputTokens: number, newRequest = false) {
-  await (await getDB()).addUsage(userId, today(), newRequest ? 1 : 0, inputTokens, outputTokens, creditsFor(provider, model, inputTokens, outputTokens));
+export async function recordUsage(userId: string, provider: string, model: string, inputTokens: number, outputTokens: number, newRequest = false, now = Date.now()) {
+  const db = await getDB();
+  const credits = creditsFor(provider, model, inputTokens, outputTokens);
+  const user = await db.getUserById(userId);
+  const hours = user ? ((await planFor(user)).sessionHours ?? 5) : 5;
+  if (!(await activeSessionStart(userId, hours, now))) await db.setSetting(sessionKey(userId), String(now));
+  await Promise.all([db.addUsage(userId, new Date(now).toISOString().slice(0, 10), newRequest ? 1 : 0, inputTokens, outputTokens, credits), db.addUsageEvent(userId, now, credits)]);
+  // Session and weekly windows never look back more than 7 days.
+  if (Math.random() < 0.02) db.pruneUsageEvents(now - 8 * DAY).catch(() => {});
 }
 
 /** Pick provider/model for a SaaS request: honour the user's choice if the plan allows it, else the plan default. */

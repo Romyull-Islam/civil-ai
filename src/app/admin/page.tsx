@@ -66,7 +66,7 @@ export default function AdminPage() {
 interface Overview {
   counts: { users: number; paidUsers: number; newThisWeek: number; pendingPayments: number; openTickets: number; requestsToday: number; requests7d: number; cloudMB: number; cloudCapMB: number };
   checklist?: { id: string; ok: boolean; title: string; detail: string; tab: string }[];
-  planSummary?: { id: string; name: string; price: number; currency: string; monthlyCredits: number; dailyCredits: number; perSeat: boolean; localAI: boolean; cloudMB: number; models: { provider: string; model: string; name: string; tier: string; hasKey: boolean }[] }[];
+  planSummary?: { id: string; name: string; price: number; currency: string; monthlyCredits: number; weeklyCredits: number; sessionCredits: number; sessionHours: number; perSeat: boolean; localAI: boolean; cloudMB: number; models: { provider: string; model: string; name: string; tier: string; hasKey: boolean }[] }[];
 }
 function OverviewTab({ go, admin }: { go: (t: Tab) => void; admin: boolean }) {
   const [o, setO] = useState<Overview | null>(null);
@@ -107,7 +107,7 @@ function OverviewTab({ go, admin }: { go: (t: Tab) => void; admin: boolean }) {
             {o.planSummary.map((p) => (
               <div key={p.id} className="border border-border rounded-lg p-3 text-sm grid gap-1 content-start">
                 <div className="font-medium">{p.name} <span className="text-muted font-normal">{p.price ? `${p.currency === "BDT" ? "৳" : p.currency + " "}${p.price}${p.perSeat ? "/user" : ""}` : "free"}</span></div>
-                <div className="text-xs text-muted">{p.monthlyCredits} credits/month ({p.dailyCredits}/day), worst-case AI cost ≈ ৳{Math.round(p.monthlyCredits * CREDIT_USD * USD_TO_BDT)} per user · backups {p.cloudMB ? `${p.cloudMB} MB` : "none"} · offline model {p.localAI ? "yes" : "no"}</div>
+                <div className="text-xs text-muted">{p.monthlyCredits} credits/month (≤{p.weeklyCredits}/week, ≤{p.sessionCredits} per {p.sessionHours}-h session), worst-case AI cost ≈ ৳{Math.round(p.monthlyCredits * CREDIT_USD * USD_TO_BDT)} per user · backups {p.cloudMB ? `${p.cloudMB} MB` : "none"} · offline model {p.localAI ? "yes" : "no"}</div>
                 <ul className="grid gap-0.5 mt-1">{p.models.map((m) => <li key={m.provider + m.model} className="flex items-center gap-1.5 text-xs"><span className={m.hasKey ? "" : "text-err line-through"}>{m.name}</span><span className="text-muted">{m.tier}</span>{!m.hasKey && <span className="text-err">no key</span>}</li>)}{!p.models.length && <li className="text-xs text-err">No models selected</li>}</ul>
               </div>
             ))}
@@ -197,7 +197,7 @@ function PlansTab() {
     else { const idx = providers.findIndex((x) => x.provider === provider); const has = providers[idx].models.includes(model); providers[idx].models = has ? providers[idx].models.filter((m) => m !== model) : [...providers[idx].models, model]; if (!providers[idx].models.length) providers = providers.filter((_, k) => k !== idx); }
     upd(i, { providers });
   };
-  const addPlan = () => setPlans([...plans, { id: `plan${plans.length + 1}`, name: "New plan", priceMonthly: 0, priceUSD: 0, currency: "BDT", monthlyCredits: 300, dailyCredits: 30, vision: false, localAI: false, periodDays: 30, graceDays: 3, cloudStorageMB: 0, maxSavedItems: 0, providers: [], features: [] }]);
+  const addPlan = () => setPlans([...plans, { id: `plan${plans.length + 1}`, name: "New plan", priceMonthly: 0, priceUSD: 0, currency: "BDT", monthlyCredits: 300, weeklyCredits: 120, sessionCredits: 40, sessionHours: 5, vision: false, localAI: false, periodDays: 30, graceDays: 3, cloudStorageMB: 0, maxSavedItems: 0, providers: [], features: [] }]);
   return (
     <div className="grid gap-3">
       <p className="text-xs text-muted">Each plan lists which models its subscribers can choose in the chat selector (the first ticked model of the first provider is the default). Providers marked <span className="text-err">no key</span> will not work until a key is added in <b>Provider API keys</b>. Prices are in the plan currency (৳ BDT); the USD price is used by Stripe. <button className="text-accent2" onClick={() => setRaw(!raw)}>{raw ? "Visual editor" : "Edit as JSON"}</button></p>
@@ -211,7 +211,9 @@ function PlansTab() {
             <div><label className="label">Price / period ({p.currency})</label><input className="input mt-1" type="number" value={p.priceMonthly} onChange={(e) => upd(i, { priceMonthly: Number(e.target.value) })} /></div>
             <div><label className="label">Price USD (Stripe)</label><input className="input mt-1" type="number" step="0.1" value={p.priceUSD ?? 0} onChange={(e) => upd(i, { priceUSD: Number(e.target.value) })} /></div>
             <div><label className="label">AI credits / period</label><input className="input mt-1" type="number" value={p.monthlyCredits} onChange={(e) => upd(i, { monthlyCredits: Number(e.target.value) })} /></div>
-            <div><label className="label">AI credits / day</label><input className="input mt-1" type="number" value={p.dailyCredits} onChange={(e) => upd(i, { dailyCredits: Number(e.target.value) })} /></div>
+            <div><label className="label">Weekly limit (credits)</label><input className="input mt-1" type="number" value={p.weeklyCredits} onChange={(e) => upd(i, { weeklyCredits: Number(e.target.value) })} /></div>
+            <div><label className="label">Session limit (credits)</label><input className="input mt-1" type="number" value={p.sessionCredits} onChange={(e) => upd(i, { sessionCredits: Number(e.target.value) })} /></div>
+            <div><label className="label">Session length (hours)</label><input className="input mt-1" type="number" min={1} max={24} value={p.sessionHours ?? 5} onChange={(e) => upd(i, { sessionHours: Number(e.target.value) })} /></div>
             <div><label className="label">Period (days)</label><input className="input mt-1" type="number" value={p.periodDays ?? 30} onChange={(e) => upd(i, { periodDays: Number(e.target.value) })} /></div>
             <div><label className="label">Cloud backup (MB / user)</label><input className="input mt-1" type="number" value={p.cloudStorageMB ?? 0} onChange={(e) => upd(i, { cloudStorageMB: Number(e.target.value) })} /></div>
             <div><label className="label">Max saved items</label><input className="input mt-1" type="number" value={p.maxSavedItems ?? 0} onChange={(e) => upd(i, { maxSavedItems: Number(e.target.value) })} /></div>

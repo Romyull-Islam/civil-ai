@@ -35,6 +35,10 @@ export interface DB {
   getUsage(userId: string, day: string): Promise<UsageRow>;
   /** totals for one user from `fromDay` (inclusive) to today */
   sumUsage(userId: string, fromDay: string): Promise<UsageRow>;
+  /** timestamped credit charges, kept ~8 days, for session (hours) and weekly limits */
+  addUsageEvent(userId: string, ts: number, credits: number): Promise<void>;
+  sumUsageEvents(userId: string, fromTs: number): Promise<number>;
+  pruneUsageEvents(beforeTs: number): Promise<void>;
   usageByDay(days: number): Promise<UsageRow[]>;
   usageByUser(days: number, limit?: number): Promise<(UsageRow & { userId: string; email: string })[]>;
   setVerification(id: string, code: string | null, expires: number | null, verified?: number): Promise<void>;
@@ -80,6 +84,8 @@ const SCHEMA = (big: string) => [
   `CREATE TABLE IF NOT EXISTS shares (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, created_at ${big} NOT NULL, expires_at ${big} NOT NULL, views INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS saves (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, created_at ${big} NOT NULL, updated_at ${big} NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS saves_user ON saves (user_id, updated_at)`,
+  `CREATE TABLE IF NOT EXISTS usage_events (user_id TEXT NOT NULL, ts ${big} NOT NULL, credits_milli ${big} NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS usage_events_user ON usage_events (user_id, ts)`,
   `CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, user_id TEXT, email TEXT NOT NULL, subject TEXT NOT NULL, message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', reply TEXT NOT NULL DEFAULT '', created_at ${big} NOT NULL, updated_at ${big} NOT NULL)`,
 ];
 /** Additive migrations (ignored when the column already exists). */
@@ -117,7 +123,7 @@ function makeDB(run: (sql: string, params?: unknown[]) => Promise<void>, all: (s
       if (!cols.length) return;
       await run(`UPDATE users SET ${cols.join(", ")} WHERE id = ?`, [...vals, id]);
     },
-    async deleteUser(id) { await run("DELETE FROM sessions WHERE user_id = ?", [id]); await run("DELETE FROM saves WHERE user_id = ?", [id]); await run("DELETE FROM shares WHERE user_id = ?", [id]); await run("DELETE FROM team_members WHERE user_id = ?", [id]); await run("DELETE FROM users WHERE id = ?", [id]); },
+    async deleteUser(id) { await run("DELETE FROM sessions WHERE user_id = ?", [id]); await run("DELETE FROM usage_events WHERE user_id = ?", [id]); await run("DELETE FROM saves WHERE user_id = ?", [id]); await run("DELETE FROM shares WHERE user_id = ?", [id]); await run("DELETE FROM team_members WHERE user_id = ?", [id]); await run("DELETE FROM users WHERE id = ?", [id]); },
     async listUsers(limit = 500) { return (await all("SELECT * FROM users ORDER BY created_at DESC LIMIT ?", [limit])).map(toUser); },
     async countUsers() { return Number((await one("SELECT COUNT(*) AS n FROM users"))?.n ?? 0); },
     async createSession(s) { await run("INSERT INTO sessions (token, user_id, expires) VALUES (?,?,?)", [s.token, s.userId, s.expires]); },
@@ -128,6 +134,9 @@ function makeDB(run: (sql: string, params?: unknown[]) => Promise<void>, all: (s
     async setSetting(key, value) { await run("DELETE FROM settings WHERE key = ?", [key]); await run("INSERT INTO settings (key, value) VALUES (?,?)", [key, value]); },
     async addUsage(userId, day, requests, i, o, credits = 0) { await run(upsertUsage, [userId, day, requests, i, o, Math.round(credits * 1000)]); },
     async getUsage(userId, day) { return toUsage(await one("SELECT * FROM usage WHERE user_id = ? AND day = ?", [userId, day])); },
+    async addUsageEvent(userId, ts, credits) { await run("INSERT INTO usage_events (user_id, ts, credits_milli) VALUES (?,?,?)", [userId, ts, Math.round(credits * 1000)]); },
+    async sumUsageEvents(userId, fromTs) { return Number((await one("SELECT COALESCE(SUM(credits_milli),0) AS c FROM usage_events WHERE user_id = ? AND ts >= ?", [userId, fromTs]))?.c ?? 0) / 1000; },
+    async pruneUsageEvents(beforeTs) { await run("DELETE FROM usage_events WHERE ts < ?", [beforeTs]); },
     async sumUsage(userId, fromDay) { return toUsage(await one("SELECT SUM(requests) AS requests, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(credits_milli) AS credits_milli FROM usage WHERE user_id = ? AND day >= ?", [userId, fromDay])); },
     async usageByDay(days) { return (await all("SELECT day, SUM(requests) AS requests, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(credits_milli) AS credits_milli FROM usage WHERE day >= ? GROUP BY day ORDER BY day DESC", [dayCutoff(days)])).map(toUsage); },
     async setVerification(id, code, expires, verified) { await run("UPDATE users SET verify_code = ?, verify_expires = ?" + (verified === undefined ? "" : ", email_verified = ?") + " WHERE id = ?", verified === undefined ? [code, expires, id] : [code, expires, verified, id]); },

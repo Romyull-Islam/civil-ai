@@ -7,7 +7,7 @@ import { useSession } from "@/lib/client/session";
 interface SiteInfo {
   gateways: { id: string; label: string; methods: string; sandbox: boolean }[];
   site: { appName: string; payment: { bkash: string; nagad: string; rocket: string; bank: string; qrImage: string; note: string; currency: string; conversion: number }; supportEmail: string; whatsapp: string };
-  plans: { id: string; name: string; priceMonthly: number; currency: string; periodDays: number; features: string[]; monthlyCredits: number; dailyCredits: number; perSeat?: boolean; minSeats?: number }[];
+  plans: { id: string; name: string; priceMonthly: number; currency: string; periodDays: number; features: string[]; monthlyCredits: number; weeklyCredits: number; sessionCredits: number; sessionHours?: number; perSeat?: boolean; minSeats?: number }[];
 }
 const METHODS = ["Visa", "Mastercard", "Amex", "bKash", "Nagad", "Rocket", "Upay", "Bangla QR", "Internet banking"];
 const cur = (c: string) => (c === "BDT" ? "৳" : c === "USD" ? "$" : c + " ");
@@ -120,6 +120,7 @@ export default function SubscribePage() {
                 <div className="flex justify-between"><span>{plan.name} plan{plan.perSeat ? ` × ${nSeats} users` : ""}</span><span>{cur(pay.currency)}{total.toLocaleString()}</span></div>
                 <div className="flex justify-between text-muted text-xs"><span>Period</span><span>{plan.periodDays} days, no auto-renewal</span></div>
                 <div className="flex justify-between text-muted text-xs"><span>AI credits</span><span>{plan.monthlyCredits.toLocaleString()} / month{plan.perSeat ? " per user" : ""}</span></div>
+                <div className="flex justify-between text-muted text-xs"><span>Limits</span><span>up to {plan.weeklyCredits.toLocaleString()} / week, {plan.sessionCredits} per {plan.sessionHours ?? 5}-hour session</span></div>
                 <div className="border-t border-border pt-2 flex justify-between font-semibold"><span>Total</span><span>{cur(pay.currency)}{total.toLocaleString()}</span></div>
                 <ul className="text-xs text-muted grid gap-1 mt-1">
                   <li className="flex gap-2"><ShieldCheck size={14} className="text-ok shrink-0" /> Secure payment, card data never touches our servers</li>

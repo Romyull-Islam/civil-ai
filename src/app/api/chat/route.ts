@@ -2,7 +2,7 @@ import { runAgent } from "@/lib/ai/agent";
 import type { ChatMessage, AgentEvent } from "@/lib/ai/types";
 import type { KeyBag } from "@/lib/ai/registry";
 import { appMode } from "@/lib/saas/mode";
-import { getSessionUser, quota, getServerKeys, chooseModel, recordUsage } from "@/lib/saas/service";
+import { getSessionUser, quota, limitMessage, getServerKeys, chooseModel, recordUsage } from "@/lib/saas/service";
 import { getCloudLink, cloudChat } from "@/lib/saas/cloud";
 
 export const runtime = "nodejs";
@@ -40,12 +40,7 @@ export async function POST(req: Request) {
     if (!user) return Response.json({ error: "Please sign in to use the assistant." }, { status: 401 });
     if (!user.emailVerified) return Response.json({ error: "Please verify your email address first (check your inbox for the code)." }, { status: 403 });
     const q = await quota(user);
-    if (q.remaining <= 0) {
-      const monthly = q.periodLimit - q.periodUsed <= q.limit - q.used;
-      return Response.json({ error: monthly
-        ? `You have used this period's ${q.periodLimit} AI credits on the ${q.plan.name} plan. Upgrade or renew to continue; calculators, drawings and the code library stay available.`
-        : `You have used today's ${q.limit} AI credits on the ${q.plan.name} plan. They refresh at 06:00 Bangladesh time (00:00 UTC); calculators, drawings and the code library stay available.` }, { status: 429 });
-    }
+    if (q.remaining <= 0) return Response.json({ error: limitMessage(q) }, { status: 429 });
     const choice = chooseModel(q.plan, body.provider, body.model);
     provider = choice.provider; model = choice.model;
     // Server-held keys only; the client's keys are ignored. Per-provider preferred models come from the plan.
