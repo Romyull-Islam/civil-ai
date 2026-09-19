@@ -1,5 +1,4 @@
 "use client";
-import { UsageBars } from "@/components/UsageBars";
 import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import { LogOut, User, ShieldCheck } from "lucide-react";
@@ -34,7 +33,7 @@ export default function AccountPage() {
         <div><span className="label">Plan</span><div>{s.plan?.name} {s.user.planExpires ? <span className="text-muted">· renews/expires {new Date(s.user.planExpires).toLocaleDateString()}</span> : null} · <Link className="text-accent2" href="/pricing">see plans</Link> · <Link className="text-accent2" href="/subscribe">subscribe / renew</Link></div></div>
         <div><span className="label">Models available on your plan</span><ul className="mt-1 grid gap-0.5">{s.allowedModels?.map((m) => <li key={m.provider + m.model} className="text-muted">{m.provider} · {m.model}</li>)}</ul></div>
       </div>
-      {s.usage && <div id="usage" className="card p-4 grid gap-3 text-sm"><div className="font-medium">AI usage</div><UsageBars usage={s.usage} /></div>}
+      {s.usage && <div className="card p-4 flex flex-wrap items-center gap-3 text-sm"><span className="font-medium">AI usage</span><span className="text-muted text-xs">{s.usage.remaining === null ? "unlimited (staff)" : `${s.usage.remaining} credits available now`}</span><Link className="btn btn-sm ml-auto" href="/usage">See usage</Link><Link className="btn btn-sm" href="/billing">Billing &amp; receipts</Link></div>}
       <div className="card p-4 grid gap-2 text-sm"><div className="font-medium">Change password</div><div className="grid sm:grid-cols-2 gap-2"><input className="input" type="password" placeholder="current password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" /><input className="input" type="password" placeholder="new password (8+)" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" /></div>{pwMsg && <div className="text-xs">{pwMsg}</div>}<button className="btn btn-sm justify-self-start" onClick={changePw} disabled={!pw.current || pw.next.length < 8}>Update password</button></div>
       {tfa && (
         <div className="card p-4 grid gap-2 text-sm">

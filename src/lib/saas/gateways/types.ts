@@ -13,6 +13,8 @@ export interface VerifyResult { ok: boolean; txnId?: string; amount?: number; cu
 export interface Gateway {
   id: string;
   label: string;
+  /** publicly documented sandbox credentials, so the whole flow can be tested before a merchant account exists */
+  sandboxValues?: Record<string, string>;
   /** what the customer can pay with on the hosted page */
   methods: string;
   fields: GatewayField[];

@@ -3,8 +3,7 @@ import { getGatewayConfig } from "@/lib/saas/gateways";
 import { verifyStripeSignature } from "@/lib/saas/gateways/stripe";
 import { completeCheckout } from "@/lib/saas/checkout";
 import { getDB } from "@/lib/saas/db";
-import { activatePlan } from "@/lib/saas/service";
-import { newId } from "@/lib/saas/crypto";
+import { fulfilPayment, sendPaymentConfirmation } from "@/lib/saas/service";
 export const runtime = "nodejs";
 export async function POST(req: Request) {
   const cfg = await getGatewayConfig("stripe");
@@ -26,9 +25,15 @@ export async function POST(req: Request) {
     const user = email ? await db.getUserByEmail(email) : null;
     if (!user || !plan) return Response.json({ ignored: true });
     const txnId = String(o.id);
-    if ((await db.listPayments({ userId: user.id, limit: 500 })).some((p) => p.txnId === txnId)) return Response.json({ duplicate: true });
-    const r = await activatePlan(user.id, plan);
-    await db.createPayment({ id: newId(), userId: user.id, email: user.email, plan, method: "stripe", amount: Number(o.amount_paid ?? 0) / 100, currency: String(o.currency ?? "usd").toUpperCase(), txnId, sender: "", status: "approved", note: "auto (stripe recurring)", createdAt: Date.now(), reviewedAt: Date.now(), seats: 1 });
+    // One payment row per Stripe invoice (fixed id): a repeated webhook delivery fails the insert instead of extending twice.
+    const id = `stripe-${txnId}`.slice(0, 64);
+    try {
+      await db.createPayment({ id, userId: user.id, email: user.email, plan, method: "stripe", amount: Number(o.amount_paid ?? 0) / 100, currency: String(o.currency ?? "usd").toUpperCase(), txnId, sender: "", status: "pending", note: "stripe recurring renewal", createdAt: Date.now(), reviewedAt: null, seats: 1 });
+    } catch { return Response.json({ duplicate: true }); }
+    if (!(await db.claimPayment(id, "pending", "approved", { note: "auto (stripe recurring)" }))) return Response.json({ duplicate: true });
+    const p = await db.getPayment(id);
+    const r = p ? await fulfilPayment(p) : null;
+    if (p && r) await sendPaymentConfirmation(p, r.label, r.until);
     return Response.json({ ok: !!r });
   }
   return Response.json({ ignored: ev.type });

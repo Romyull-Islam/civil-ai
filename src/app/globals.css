@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "katex/dist/katex.min.css";
 
+/* `dark:` utilities follow the app theme switch (data-theme on <html>), dark being the default. */
+@custom-variant dark (&:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *));
+
 :root {
   --bg: #0f1216;
   --bg-elev: #161a20;

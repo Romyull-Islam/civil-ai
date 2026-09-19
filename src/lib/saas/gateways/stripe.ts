@@ -32,7 +32,8 @@ export const stripe: Gateway = {
     const id = params.session_id;
     if (!id) return { ok: false, status: "invalid" };
     const j = await api(cfg.values.secret_key, `/checkout/sessions/${id}`, undefined, "GET");
-    const ok = (j.payment_status === "paid" || j.status === "complete") && j.client_reference_id === ctx.paymentId;
+    const paid = Number(j.amount_total ?? 0) / 100;
+    const ok = (j.payment_status === "paid" || j.status === "complete") && j.client_reference_id === ctx.paymentId && paid + 0.01 >= ctx.amount && String(j.currency ?? "").toUpperCase() === ctx.currency.toUpperCase();
     return { ok, status: ok ? "paid" : "pending", txnId: String(j.payment_intent ?? j.subscription ?? id), amount: Number(j.amount_total ?? 0) / 100, currency: String(j.currency ?? ctx.currency).toUpperCase(), raw: j };
   },
 };

@@ -49,8 +49,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menu]);
-  // Auth screens and public share pages render without the app chrome.
-  const authPage = ["/login", "/signup", "/verify", "/forgot", "/reset"].includes(path) || path.startsWith("/share/");
+  // Auth screens, public share pages and printable receipts render without the app chrome.
+  const authPage = ["/login", "/signup", "/verify", "/forgot", "/reset"].includes(path) || path.startsWith("/share/") || path.startsWith("/billing/receipt/");
   if (authPage) return <div className="h-full">{children}</div>;
 
   const user = session?.user;
@@ -58,9 +58,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const staff = saas && user && user.role !== "user";
   const menuItems: { href: string; label: string; icon: typeof Settings; show: boolean }[] = [
     { href: "/settings", label: "Settings", icon: Settings, show: true },
-    { href: "/pricing", label: "Plans & billing", icon: CreditCard, show: saas },
+    { href: "/usage", label: "Usage", icon: BarChart3, show: saas && !!user },
+    { href: user ? "/billing" : "/pricing", label: "Plans & billing", icon: CreditCard, show: saas },
     { href: "/subscribe", label: session?.plan?.id === "free" ? "Upgrade plan" : "Renew / change plan", icon: Sparkles, show: saas && !!user },
-    { href: "/account#usage", label: "Usage & account", icon: BarChart3, show: saas && !!user },
+    { href: "/account", label: "Account & security", icon: User, show: saas && !!user },
     { href: "/saves", label: "Cloud backups", icon: Cloud, show: saas && !!user },
     { href: "/team", label: "Team", icon: Users, show: saas && !!session?.inTeam },
     { href: "/admin", label: user?.role === "support" ? "Helpdesk" : "Admin", icon: Shield, show: !!staff },

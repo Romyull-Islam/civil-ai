@@ -1,4 +1,4 @@
-/** Gateway return URL (browser redirect; GET with query or POST with form fields). Verifies and redirects the user to /account. */
+/** Gateway return URL (browser redirect; GET with query or POST with form fields). Verifies and redirects the user to the payment result page. */
 import { completeCheckout } from "@/lib/saas/checkout";
 export const runtime = "nodejs";
 
@@ -13,8 +13,9 @@ async function handle(req: Request, gateway: string) {
   const pid = params.pid ?? params.tran_id ?? params.mer_txnid ?? params.merchantInvoiceNumber ?? "";
   const base = process.env.NEXT_PUBLIC_APP_URL ?? url.origin;
   const r = pid ? await completeCheckout(gateway, pid, params, base) : { status: "invalid" as const };
-  const dest = new URL("/account", base);
-  dest.searchParams.set("payment", r.status === "already" ? "paid" : r.status);
+  const dest = new URL("/billing/result", base);
+  dest.searchParams.set("status", r.status === "already" ? "paid" : r.status);
+  if (pid) dest.searchParams.set("pid", pid);
   return Response.redirect(dest.toString(), 303);
 }
 export async function GET(req: Request, ctx: { params: Promise<{ gateway: string }> }) { return handle(req, (await ctx.params).gateway); }

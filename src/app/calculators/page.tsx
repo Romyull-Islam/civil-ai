@@ -7,6 +7,18 @@ import type { ToolOutput } from "@/lib/tools";
 
 interface ToolMeta { name: string; category: string; description: string; schema: Record<string, unknown> }
 const CATS: Record<string, string> = { analysis: "Analysis", design: "Design", geotech: "Geotechnical", quantities: "Quantities & BOQ", utility: "Utilities", reference: "Reference", drawing: "Drawings" };
+/** One colour per category (heading, marker and selected item), readable in light and dark themes. */
+const CAT_COLOR: Record<string, { text: string; dot: string; active: string }> = {
+  analysis: { text: "text-sky-600 dark:text-sky-400", dot: "bg-sky-500", active: "border-sky-500 bg-sky-500/10" },
+  design: { text: "text-amber-600 dark:text-amber-400", dot: "bg-amber-500", active: "border-amber-500 bg-amber-500/10" },
+  geotech: { text: "text-emerald-600 dark:text-emerald-400", dot: "bg-emerald-500", active: "border-emerald-500 bg-emerald-500/10" },
+  quantities: { text: "text-violet-600 dark:text-violet-400", dot: "bg-violet-500", active: "border-violet-500 bg-violet-500/10" },
+  utility: { text: "text-rose-600 dark:text-rose-400", dot: "bg-rose-500", active: "border-rose-500 bg-rose-500/10" },
+  reference: { text: "text-teal-600 dark:text-teal-400", dot: "bg-teal-500", active: "border-teal-500 bg-teal-500/10" },
+};
+const FALLBACK_COLOR = { text: "text-muted", dot: "bg-muted", active: "border-border bg-elev2" };
+/** "design_rc_beam" → "Design RC beam" */
+const toolLabel = (name: string) => name.replace(/_/g, " ").replace(/\b(rc|boq|sbc|dxf)\b/g, (m) => m.toUpperCase()).replace(/^./, (c) => c.toUpperCase());
 
 const PRESETS: Record<string, Record<string, unknown>> = {
   analyze_beam: { span: 6, support: "simply_supported", loads: [{ type: "udl", magnitude: 20 }], E: 200000, section: { b: 300, h: 500 } },
@@ -16,7 +28,7 @@ const PRESETS: Record<string, Record<string, unknown>> = {
   design_isolated_footing: { code: "IS456", columnB: 400, columnD: 400, serviceLoad: 900, safeBearingCapacity: 180, fck: 25, fy: 500, cover: 50 },
   design_steel_beam: { code: "IS800", span: 6, factoredUDL: 30, serviceUDL: 20 },
   bearing_capacity: { cohesion: 10, frictionAngle: 30, unitWeight: 18, depth: 1.5, width: 2, shape: "square", factorOfSafety: 3 },
-  concrete_materials: { volume: 10, grade: "M20", wastagePercent: 3 },
+  concrete_materials: { volume: 100, volumeUnit: "cft", ratio: "1:2:4", wastagePercent: 3 },
   rebar_schedule: { items: [{ label: "Bottom bars", diameter: 16, length: 6.3, count: 4 }, { label: "Stirrups", diameter: 8, length: 1.5, count: 40 }], wastagePercent: 3 },
   convert_units: { value: 1, from: "kN/m2", to: "psf" },
   calculate: { expression: "0.36*25*300*0.46*450*(450-0.42*0.46*450)/1e6" },
@@ -44,17 +56,16 @@ export default function CalculatorsPage() {
   return (
     <div className="flex h-full min-h-0">
       <aside className="w-64 shrink-0 border-r border-border overflow-y-auto p-2 hidden md:block">
-        {Object.entries(grouped).map(([cat, list]) => (
+        {Object.entries(grouped).map(([cat, list]) => { const c = CAT_COLOR[cat] ?? FALLBACK_COLOR; return (
           <div key={cat} className="mb-3">
-            <div className="label px-2 mb-1">{CATS[cat] ?? cat}</div>
-            {list.map((t) => <button key={t.name} className={`w-full text-left rounded-lg px-2 py-1.5 text-sm ${selected === t.name ? "bg-elev2" : "hover:bg-elev2 text-muted"}`} onClick={() => pick(t)}>{t.name.replace(/_/g, " ")}</button>)}
-          </div>
-        ))}
+            <div className={`flex items-center gap-2 px-2 mb-1 text-[11px] font-semibold uppercase tracking-wide ${c.text}`}><span className={`h-2 w-2 rounded-full ${c.dot}`} />{CATS[cat] ?? cat}</div>
+            {list.map((t) => <button key={t.name} className={`w-full text-left rounded-lg border-l-2 px-2 py-1.5 text-sm ${selected === t.name ? `${c.active} text-fg font-medium` : "border-transparent hover:bg-elev2 text-muted"}`} onClick={() => pick(t)}>{toolLabel(t.name)}</button>)}
+          </div>); })}
       </aside>
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto p-4 grid gap-4">
           <div className="md:hidden">
-            <select className="select" value={selected} onChange={(e) => { const t = tools.find((x) => x.name === e.target.value); if (t) pick(t); }}>{tools.map((t) => <option key={t.name} value={t.name}>{t.name.replace(/_/g, " ")}</option>)}</select>
+            <select className="select" value={selected} onChange={(e) => { const t = tools.find((x) => x.name === e.target.value); if (t) pick(t); }}>{Object.entries(grouped).map(([cat, list]) => <optgroup key={cat} label={CATS[cat] ?? cat}>{list.map((t) => <option key={t.name} value={t.name}>{toolLabel(t.name)}</option>)}</optgroup>)}</select>
           </div>
           {tool && (
             <>

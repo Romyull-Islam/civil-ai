@@ -25,7 +25,7 @@ describe("credit pricing", () => {
   });
   it("plans saved by older versions get monthly, weekly and session budgets", () => {
     const legacy = { ...DEFAULT_PLANS[1], monthlyCredits: undefined, weeklyCredits: undefined, sessionCredits: undefined, dailyRequests: 100 } as unknown as Plan;
-    expect(withCreditDefaults(legacy)).toMatchObject({ monthlyCredits: 500, weeklyCredits: 200, sessionCredits: 60, sessionHours: 5 });
+    expect(withCreditDefaults(legacy)).toMatchObject({ monthlyCredits: 500, weeklyCredits: 200, sessionCredits: 80, sessionHours: 5 });
     const daily = { ...legacy, id: "gold", dailyCredits: 100 } as unknown as Plan;
     expect(withCreditDefaults(daily)).toMatchObject({ monthlyCredits: 1000, weeklyCredits: 400, sessionCredits: 120 });
   });
@@ -47,7 +47,8 @@ describe("quota against a real database", () => {
   beforeAll(() => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "civilmate-credits-"));
     process.env.DATABASE_PATH = path.join(dir, "test.sqlite");
-    delete process.env.DATABASE_URL;
+    // TEST_PG_URL=postgres://… runs the same tests against Postgres (production database engine).
+    if (process.env.TEST_PG_URL) process.env.DATABASE_URL = process.env.TEST_PG_URL; else delete process.env.DATABASE_URL;
   });
 
   it("period starts: calendar month for free, expiry minus period for paid", async () => {
@@ -71,13 +72,14 @@ describe("quota against a real database", () => {
     const { getDB } = await import("@/lib/saas/db");
     const { quota, recordUsage, limitMessage } = await import("@/lib/saas/service");
     const db = await getDB();
-    const user = { id: "u-credits", email: "credits@test.local", name: "", passwordHash: "x", role: "user" as const, plan: "free", planExpires: null, createdAt: Date.now(), disabled: 0, emailVerified: 1, verifyCode: null, verifyExpires: null };
+    const run = Math.random().toString(36).slice(2, 8);
+    const user = { id: `u-credits-${run}`, email: `${run}-credits@test.local`, name: "", passwordHash: "x", role: "user" as const, plan: "free", planExpires: null, createdAt: Date.now(), disabled: 0, emailVerified: 1, verifyCode: null, verifyExpires: null };
     await db.createUser(user);
     const t0 = Date.parse("2026-09-15T02:00:00Z"); // Tuesday, first day of the third week of September
     const H = 3600000;
     let q = await quota(user, t0);
-    expect(q.session).toMatchObject({ used: 0, limit: 8, resetsAt: null });
-    expect(q.remaining).toBe(8);
+    expect(q.session).toMatchObject({ used: 0, limit: 10, resetsAt: null });
+    expect(q.remaining).toBe(10);
 
     // one question on Gemini 3.5 Flash-Lite in two model calls ≈ 4.25 credits; the session starts now
     await recordUsage(user.id, "gemini", "gemini-3.5-flash-lite", 10000, 500, true, t0);
@@ -87,12 +89,12 @@ describe("quota against a real database", () => {
     expect(q.session.resetsAt).toBe(t0 + 5 * H);
     expect((await db.getUsage(user.id, "2026-09-15")).requests).toBe(1);
 
-    // two more questions go past the 8-credit session limit (the answer that started is still finished)
+    // two more questions go past the 10-credit session limit (the answer that started is still finished)
     await recordUsage(user.id, "gemini", "gemini-3.8-flash", 5000, 500, true, t0 + 2 * H); // ≈ 2.8
     await recordUsage(user.id, "gemini", "gemini-3.8-flash", 6000, 400, true, t0 + 2 * H); // ≈ 3.0
     q = await quota(user, t0 + 3 * H);
     expect(q.blockedBy).toBe("session");
-    expect(limitMessage(q)).toMatch(/8-credit limit for this 5-hour session.*new session starts/);
+    expect(limitMessage(q)).toMatch(/10-credit limit for this 5-hour session.*new session starts/);
 
     // after 5 hours a new session begins; the week keeps counting (15 − 10.05 left)
     q = await quota(user, t0 + 6 * H);

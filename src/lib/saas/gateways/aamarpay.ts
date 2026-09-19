@@ -4,6 +4,7 @@ import { Gateway, form, returnUrl } from "./types";
 export const aamarpay: Gateway = {
   id: "aamarpay",
   label: "aamarPay",
+  sandboxValues: { store_id: "aamarpaytest", signature_key: "dbb74894e82415a2f7ff0ec3a97e4183" },
   methods: "bKash, Nagad, Rocket, Upay, cards, internet banking",
   fields: [{ key: "store_id", label: "Store ID", placeholder: "aamarpaytest (sandbox)" }, { key: "signature_key", label: "Signature key", secret: true }],
   docs: "https://aamarpay.readme.io/reference/initiate-payment-json",

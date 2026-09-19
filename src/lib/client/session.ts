@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 
 export interface Allowance { used: number; limit: number | null; resetsAt: number | null }
-export interface UsageInfo { remaining: number | null; blockedBy: "session" | "week" | "period" | null; session: Allowance; week: Allowance; period: Allowance & { start: string }; sessionHours: number }
+export interface UsageInfo { remaining: number | null; allowanceRemaining?: number | null; blockedBy: "session" | "week" | "period" | null; session: Allowance; week: Allowance; period: Allowance & { start: string }; sessionHours: number; extra?: { balance: number; nextExpiry: number | null } }
 
 export interface SessionInfo {
   mode: "saas" | "byok" | "desktop";

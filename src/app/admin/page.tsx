@@ -58,7 +58,7 @@ export default function AdminPage() {
       <div className="flex-1 min-w-0 overflow-y-auto"><div className="max-w-6xl mx-auto p-4 grid gap-4">
         <select className="select md:hidden" value={current} onChange={(e) => setTab(e.target.value as Tab)}>{GROUPS.flatMap((g) => g.items).filter(([id]) => allowed(id)).map(([id, , label]) => <option key={id} value={id}>{label}</option>)}</select>
         {current === "overview" && <OverviewTab go={setTab} admin={role !== "support"} />}
-        {current === "users" && <UsersTab me={s.user!} />}{current === "teams" && <TeamsTab />}{current === "payments" && <PaymentsTab />}{current === "support" && <SupportTab />}{current === "keys" && <KeysTab />}{current === "gateways" && <GatewaysTab />}{current === "plans" && <PlansTab />}{current === "site" && <SiteTab />}{current === "usage" && <UsageTab />}{current === "promos" && <PromosTab />}
+        {current === "users" && <UsersTab me={s.user!} />}{current === "teams" && <TeamsTab />}{current === "payments" && <PaymentsTab />}{current === "support" && <SupportTab />}{current === "keys" && <KeysTab />}{current === "gateways" && <GatewaysTab />}{current === "plans" && <><PlansTab /><CreditPacksEditor /></>}{current === "site" && <SiteTab />}{current === "usage" && <UsageTab />}{current === "promos" && <PromosTab />}
       </div></div>
     </div>
   );
@@ -185,6 +185,31 @@ function KeysTab() {
   );
 }
 
+/** Extra-credit packs customers can buy when a limit is reached (Billing page → Buy extra AI credits). */
+function CreditPacksEditor() {
+  interface Pack { id: string; name: string; price: number; currency: string; credits: number; validityDays: number }
+  const [packs, setPacks] = useState<Pack[] | null>(null); const [defaults, setDefaults] = useState<Pack[]>([]); const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => { fetch("/api/admin/packs").then((r) => r.json()).then((j) => { setPacks(j.packs); setDefaults(j.defaults ?? []); }); }, []);
+  if (!packs) return null;
+  const upd = (i: number, patch: Partial<Pack>) => setPacks(packs.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  const save = async () => { setMsg(null); const r = await fetch("/api/admin/packs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ packs }) }); const j = await r.json(); setMsg(r.ok ? "Saved." : j.error); if (r.ok) setPacks(j.packs); };
+  return (
+    <div className="card p-4 grid gap-3 text-sm mt-3">
+      <div><div className="font-medium">Extra-credit packs</div><p className="text-xs text-muted">Anyone signed in can buy these when a limit is reached. Pack credits are used only after the plan allowance runs out and expire after the validity period. Keep the AI cost share below about 50% so packs stay profitable and a plan stays the better deal.</p></div>
+      {packs.map((p, i) => { const costBDT = p.credits * CREDIT_USD * USD_TO_BDT; const share = p.price ? Math.round((100 * costBDT) / p.price) : 0; return (
+        <div key={i} className="grid sm:grid-cols-6 gap-2 items-end">
+          <div><label className="label">ID</label><input className="input mt-1" value={p.id} onChange={(e) => upd(i, { id: e.target.value.replace(/[^a-z0-9_-]/gi, "").toLowerCase() })} /></div>
+          <div><label className="label">Name</label><input className="input mt-1" value={p.name} onChange={(e) => upd(i, { name: e.target.value })} /></div>
+          <div><label className="label">Price (৳)</label><input className="input mt-1" type="number" min={1} value={p.price} onChange={(e) => upd(i, { price: Number(e.target.value) })} /></div>
+          <div><label className="label">Credits</label><input className="input mt-1" type="number" min={1} value={p.credits} onChange={(e) => upd(i, { credits: Number(e.target.value) })} /></div>
+          <div><label className="label">Valid (days)</label><input className="input mt-1" type="number" min={1} value={p.validityDays} onChange={(e) => upd(i, { validityDays: Number(e.target.value) })} /></div>
+          <div className="text-xs pb-2"><span className={share > 50 ? "text-err" : "text-muted"}>AI cost ≈ ৳{Math.round(costBDT)} ({share}% of price)</span> <button className="text-err ml-1" onClick={() => setPacks(packs.filter((_, j) => j !== i))}>remove</button></div>
+        </div>); })}
+      <div className="flex gap-2 items-center"><button className="btn btn-primary" onClick={save}><Save size={14} /> Save packs</button><button className="btn" onClick={() => setPacks([...packs, { id: `pack${packs.length + 1}`, name: "New pack", price: 100, currency: "BDT", credits: 180, validityDays: 90 }])}>Add pack</button><button className="btn" onClick={() => setPacks(defaults)}>Load defaults</button>{msg && <span className="text-xs">{msg}</span>}</div>
+    </div>
+  );
+}
+
 function PlansTab() {
   const [plans, setPlans] = useState<Plan[]>([]); const [keys, setKeys] = useState<Record<string, { set: boolean; fromEnv: boolean }>>({}); const [err, setErr] = useState<string | null>(null); const [ok, setOk] = useState(false); const [raw, setRaw] = useState(false); const [text, setText] = useState("");
   const load = () => Promise.all([fetch("/api/admin/plans").then((r) => r.json()), fetch("/api/admin/keys").then((r) => r.json())]).then(([p, k]) => { setPlans(p.plans); setText(JSON.stringify(p.plans, null, 2)); setKeys(k); });
@@ -291,18 +316,64 @@ function UsageTab() {
 }
 
 function PaymentsTab() {
-  const [list, setList] = useState<{ id: string; email: string; plan: string; method: string; amount: number; currency: string; txnId: string; sender: string; status: string; note: string; createdAt: number }[]>([]);
+  interface P { id: string; email: string; plan: string; method: string; amount: number; currency: string; txnId: string; sender: string; status: string; note: string; createdAt: number; carriedDays?: number }
+  const online = (p: P) => ["sslcommerz", "aamarpay", "shurjopay", "bkash", "stripe"].includes(p.method) && p.txnId.startsWith("CIV");
+  const [list, setList] = useState<P[]>([]); const [paid, setPaid] = useState<P[]>([]);
   const [filter, setFilter] = useState("pending");
-  const load = () => fetch(`/api/admin/payments${filter ? `?status=${filter}` : ""}`).then((r) => r.json()).then((j) => setList(j.payments ?? []));
+  const [kind, setKind] = useState<"all" | "manual" | "online">("all");
+  const [q, setQ] = useState("");
+  const [gift, setGift] = useState({ email: "", credits: 100, days: 90, note: "" }); const [giftMsg, setGiftMsg] = useState<string | null>(null);
+  const load = () => { fetch(`/api/admin/payments${filter ? `?status=${filter}` : ""}`).then((r) => r.json()).then((j) => setList(j.payments ?? [])); fetch("/api/admin/payments?status=approved").then((r) => r.json()).then((j) => setPaid(j.payments ?? [])); };
   useEffect(() => { load(); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
-  const review = async (id: string, status: "approved" | "rejected") => { const note = status === "rejected" ? (prompt("Reason (sent to the user):") ?? "") : ""; await fetch("/api/admin/payments", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status, note }) }); load(); };
+  const act = async (id: string, status: "approved" | "rejected" | "refunded") => {
+    let note = ""; let revoke = false;
+    if (status === "rejected") note = prompt("Reason (sent to the user):") ?? "";
+    if (status === "refunded") { if (!confirm("Mark this payment as refunded? Send the money back through the gateway's merchant panel (or bKash/bank) first.")) return; revoke = confirm("Also take back what it bought (remove the plan period / cancel the pack's unused credits)?"); note = prompt("Refund note (optional):") ?? ""; }
+    await fetch("/api/admin/payments", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status, note, revoke }) }); load();
+  };
+  const giveCredits = async () => { setGiftMsg(null); const r = await fetch("/api/admin/credits", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(gift) }); const j = await r.json(); setGiftMsg(r.ok ? `Gave ${gift.credits} credits to ${gift.email}.` : j.error); };
+  const shown = list.filter((p) => (kind === "all" || (kind === "online") === online(p)) && (!q || `${p.email} ${p.txnId} ${p.sender}`.toLowerCase().includes(q.toLowerCase())));
+  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+  const paidThisMonth = paid.filter((p) => p.createdAt >= monthStart.getTime());
+  const byMethod = paidThisMonth.reduce<Record<string, number>>((m, p) => ({ ...m, [p.method]: (m[p.method] ?? 0) + p.amount }), {});
+  const badge = (st: string) => st === "approved" ? "text-ok border-ok/40" : st === "rejected" ? "text-err border-err/40" : st === "pending" ? "text-accent border-accent/40" : "text-muted";
   return (
-    <div className="card p-4 grid gap-3">
-      <div className="flex items-center gap-2"><select className="select !w-auto" value={filter} onChange={(e) => setFilter(e.target.value)}><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="">All</option></select><span className="text-xs text-muted">Check the transaction in your bKash/Nagad/Rocket/bank app, then approve. Approving sets the plan and extends the expiry by the plan period.</span><button className="btn btn-sm ml-auto" onClick={load}><RefreshCw size={13} /></button></div>
-      <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-xs text-muted"><th>Date</th><th>User</th><th>Plan</th><th>Method</th><th>Amount</th><th>TrxID</th><th>Sender</th><th>Status</th><th></th></tr></thead>
-        <tbody>{list.map((p) => <tr key={p.id} className="border-t border-border"><td className="py-1.5 text-xs">{new Date(p.createdAt).toLocaleString()}</td><td className="text-xs">{p.email}</td><td>{p.plan}</td><td>{p.method}</td><td>{p.amount} {p.currency}</td><td className="font-mono text-xs">{p.txnId}</td><td className="text-xs">{p.sender}</td><td>{p.status}{p.note ? <div className="text-xs text-muted">{p.note}</div> : null}</td><td className="whitespace-nowrap">{p.status === "pending" && <><button className="btn btn-sm text-ok" onClick={() => review(p.id, "approved")}>Approve</button> <button className="btn btn-sm text-err" onClick={() => review(p.id, "rejected")}>Reject</button></>}</td></tr>)}</tbody></table>
-        {!list.length && <div className="text-xs text-muted py-2">Nothing here.</div>}</div>
+    <div className="grid gap-3">
+      <div className="card p-4 grid gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-3"><span className="font-medium">This month</span><span className="text-xl font-semibold">৳{paidThisMonth.filter((p) => p.currency === "BDT").reduce((a, p) => a + p.amount, 0).toLocaleString()}</span><span className="text-xs text-muted">{paidThisMonth.length} payments received</span>
+          <a className="btn btn-sm ml-auto" href="/api/admin/payments/export">Export all (CSV)</a></div>
+        {Object.keys(byMethod).length > 0 && <div className="flex flex-wrap gap-2 text-xs">{Object.entries(byMethod).map(([m, v]) => <span key={m} className="badge">{m}: {v.toLocaleString()}</span>)}</div>}
+      </div>
+      <div className="card p-4 grid gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="select !w-auto" value={filter} onChange={(e) => setFilter(e.target.value)}><option value="pending">Pending</option><option value="approved">Paid</option><option value="rejected">Failed / rejected</option><option value="refunded">Refunded</option><option value="expired">Not completed</option><option value="">All</option></select>
+          <select className="select !w-auto" value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}><option value="all">Online + manual</option><option value="manual">Manual transfers</option><option value="online">Online gateways</option></select>
+          <input className="input !w-56" placeholder="search email / TrxID / sender" value={q} onChange={(e) => setQ(e.target.value)} />
+          <button className="btn btn-sm ml-auto" onClick={load}><RefreshCw size={13} /></button>
+        </div>
+        <p className="text-xs text-muted">Manual transfers: check the TrxID in your bKash/Nagad/Rocket/bank app, then approve (the plan or credit pack activates and a receipt is emailed). Online payments activate by themselves; pending ones are re-checked every 15 minutes and expire after 24 hours if never paid.</p>
+        <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-xs text-muted"><th>Date</th><th>User</th><th>For</th><th>Method</th><th>Amount</th><th>Reference</th><th>Sender</th><th>Status</th><th></th></tr></thead>
+          <tbody>{shown.map((p) => <tr key={p.id} className="border-t border-border align-top">
+            <td className="py-1.5 text-xs whitespace-nowrap">{new Date(p.createdAt).toLocaleString()}</td><td className="text-xs">{p.email}</td>
+            <td className="text-xs">{p.plan.startsWith("credits:") ? `credit pack (${p.plan.slice(8)})` : p.plan}{p.carriedDays ? <div className="text-muted">+{p.carriedDays} d carried</div> : null}</td>
+            <td className="text-xs">{p.method === "bkash" && !online(p) ? "bkash (manual)" : p.method}</td><td className="whitespace-nowrap">{p.amount} {p.currency}</td><td className="font-mono text-xs break-all">{p.txnId}</td><td className="text-xs">{p.sender}</td>
+            <td><span className={`badge ${badge(p.status)}`} title={p.note}>{p.status === "expired" ? "not completed" : p.status}</span></td>
+            <td className="text-right whitespace-nowrap text-xs">
+              {p.status === "pending" && !online(p) && <><button className="btn btn-sm text-ok" onClick={() => act(p.id, "approved")}>Approve</button> <button className="btn btn-sm text-err" onClick={() => act(p.id, "rejected")}>Reject</button></>}
+              {p.status === "approved" && <><a className="text-accent2 mr-2" href={`/billing/receipt/${p.id}`} target="_blank" rel="noreferrer">Receipt</a><button className="btn btn-sm" onClick={() => act(p.id, "refunded")}>Refund</button></>}
+            </td></tr>)}</tbody></table>
+          {!shown.length && <div className="text-xs text-muted py-2">Nothing here.</div>}</div>
+      </div>
+      <div className="card p-4 grid sm:grid-cols-5 gap-2 items-end text-sm">
+        <div className="sm:col-span-5"><span className="font-medium">Give extra AI credits</span> <span className="text-xs text-muted">(goodwill, a payment sorted out by hand, a promotion)</span></div>
+        <input className="input" placeholder="customer email" value={gift.email} onChange={(e) => setGift({ ...gift, email: e.target.value })} />
+        <div><label className="label">Credits</label><input className="input mt-1" type="number" min={1} value={gift.credits} onChange={(e) => setGift({ ...gift, credits: Number(e.target.value) })} /></div>
+        <div><label className="label">Valid days</label><input className="input mt-1" type="number" min={1} max={365} value={gift.days} onChange={(e) => setGift({ ...gift, days: Number(e.target.value) })} /></div>
+        <input className="input" placeholder="note (optional)" value={gift.note} onChange={(e) => setGift({ ...gift, note: e.target.value })} />
+        <button className="btn btn-primary" onClick={giveCredits} disabled={!gift.email}>Give credits</button>
+        {giftMsg && <div className="sm:col-span-5 text-xs">{giftMsg}</div>}
+      </div>
     </div>
   );
 }
@@ -333,6 +404,7 @@ function SiteTabInner() {
   if (!site) return <div className="text-sm text-muted">Loading…</div>;
   const set = (patch: Partial<SiteSettings>) => setSite({ ...site, ...patch });
   const setPay = (patch: Partial<SiteSettings["payment"]>) => setSite({ ...site, payment: { ...site.payment, ...patch } });
+  const setBill = (patch: Partial<SiteSettings["billing"]>) => setSite({ ...site, billing: { ...site.billing, ...patch } });
   const save = async () => { setErr(null); const r = await fetch("/api/admin/site", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ site }) }); const j = await r.json(); if (!r.ok) { setErr(j.error); return; } setSaved(true); setTimeout(() => setSaved(false), 1500); };
   const onQr = (f: File | null) => { if (!f) return; const rd = new FileReader(); rd.onload = () => setPay({ qrImage: String(rd.result) }); rd.readAsDataURL(f); };
   return (
@@ -361,9 +433,19 @@ function SiteTabInner() {
         <div><label className="label">FAQ</label><textarea className="textarea mt-1 min-h-48 font-mono text-xs" value={site.faq} onChange={(e) => set({ faq: e.target.value })} /></div>
         <div><label className="label">Cancellation & refund policy (short, Help page)</label><textarea className="textarea mt-1 min-h-20 font-mono text-xs" value={site.cancellationPolicy} onChange={(e) => set({ cancellationPolicy: e.target.value })} /></div>
       </div>
+      <div className="card p-4 grid sm:grid-cols-3 gap-3 text-sm">
+        <h2 className="font-medium sm:col-span-3">Company details for receipts <span className="text-xs text-muted font-normal">(optional, fill in when your trade licence and VAT registration are ready; receipts show only what is filled)</span></h2>
+        <div><label className="label">Company / legal name</label><input className="input mt-1" value={site.companyName} onChange={(e) => set({ companyName: e.target.value })} placeholder="XYZ Engineering Ltd." /></div>
+        <div className="sm:col-span-2"><label className="label">Registered address</label><input className="input mt-1" value={site.companyAddress} onChange={(e) => set({ companyAddress: e.target.value })} /></div>
+        <div><label className="label">Billing phone</label><input className="input mt-1" value={site.billing.phone} onChange={(e) => setBill({ phone: e.target.value })} placeholder="01XXXXXXXXX" /></div>
+        <div><label className="label">Trade licence no.</label><input className="input mt-1" value={site.billing.tradeLicense} onChange={(e) => setBill({ tradeLicense: e.target.value })} /></div>
+        <div><label className="label">BIN (VAT registration no.)</label><input className="input mt-1" value={site.billing.bin} onChange={(e) => setBill({ bin: e.target.value })} /></div>
+        <div><label className="label">VAT %</label><input className="input mt-1" type="number" min={0} max={30} step="0.5" value={site.billing.vatPercent} onChange={(e) => setBill({ vatPercent: Number(e.target.value) })} /></div>
+        <label className="flex items-center gap-2 sm:col-span-2 pt-5"><input type="checkbox" checked={site.billing.pricesIncludeVat} onChange={(e) => setBill({ pricesIncludeVat: e.target.checked })} /> Plan prices already include VAT (receipts show the VAT part of the price)</label>
+        <div className="sm:col-span-3"><label className="label">Note printed at the bottom of receipts</label><input className="input mt-1" value={site.billing.receiptNote} onChange={(e) => setBill({ receiptNote: e.target.value })} /></div>
+      </div>
       <div className="card p-4 grid gap-3 text-sm">
         <h2 className="font-medium">Legal pages (required by payment gateways for merchant approval)</h2>
-        <div className="grid sm:grid-cols-2 gap-2"><div><label className="label">Company / legal name</label><input className="input mt-1" value={site.companyName} onChange={(e) => set({ companyName: e.target.value })} placeholder="XYZ Engineering Ltd. (trade licence holder)" /></div><div><label className="label">Registered address</label><input className="input mt-1" value={site.companyAddress} onChange={(e) => set({ companyAddress: e.target.value })} /></div></div>
         <div><label className="label">Terms of Service (/terms)</label><textarea className="textarea mt-1 min-h-40 font-mono text-xs" value={site.terms} onChange={(e) => set({ terms: e.target.value })} /></div>
         <div><label className="label">Privacy Policy (/privacy)</label><textarea className="textarea mt-1 min-h-40 font-mono text-xs" value={site.privacy} onChange={(e) => set({ privacy: e.target.value })} /></div>
         <div><label className="label">Refund & Cancellation Policy (/refund-policy)</label><textarea className="textarea mt-1 min-h-32 font-mono text-xs" value={site.refundPolicy} onChange={(e) => set({ refundPolicy: e.target.value })} /></div>
@@ -374,24 +456,43 @@ function SiteTabInner() {
   );
 }
 
+function CopyRow({ label, value }: { label: string; value: string }) {
+  return <div className="flex items-center gap-2 text-xs"><span className="text-muted w-40 shrink-0">{label}</span><code className="bg-elev2 rounded px-1.5 py-0.5 break-all flex-1">{value}</code><button className="btn btn-sm" onClick={() => navigator.clipboard.writeText(value)}>Copy</button></div>;
+}
+
 function GatewaysTabInner() {
-  interface GW { id: string; label: string; methods: string; docs: string; fields: { key: string; label: string; secret?: boolean; placeholder?: string }[]; enabled: boolean; sandbox: boolean; fromEnv?: boolean; values: Record<string, string> }
-  const [list, setList] = useState<GW[]>([]); const [draft, setDraft] = useState<Record<string, Partial<GW>>>({}); const [msg, setMsg] = useState<string | null>(null);
-  const load = () => fetch("/api/admin/gateways").then((r) => r.json()).then((j) => setList(j.gateways ?? []));
+  interface GW { id: string; label: string; methods: string; docs: string; fields: { key: string; label: string; secret?: boolean; placeholder?: string }[]; state: string; hasSandboxValues: boolean; enabled: boolean; sandbox: boolean; fromEnv?: boolean; values: Record<string, string> }
+  interface CB { base: string; returnUrl: string; sslcommerzIpn: string; stripeWebhook: string; genericWebhook: string }
+  const [list, setList] = useState<GW[]>([]); const [cb, setCb] = useState<CB | null>(null); const [appUrlSet, setAppUrlSet] = useState(true);
+  const [draft, setDraft] = useState<Record<string, Partial<GW>>>({}); const [msg, setMsg] = useState<Record<string, { ok: boolean; text: string }>>({}); const [busy, setBusy] = useState<string | null>(null);
+  const load = () => fetch("/api/admin/gateways").then((r) => r.json()).then((j) => { setList(j.gateways ?? []); setCb(j.callbacks ?? null); setAppUrlSet(j.appUrlSet !== false); });
   useEffect(() => { load(); }, []);
-  const save = async (g: GW) => { const d = draft[g.id] ?? {}; const r = await fetch("/api/admin/gateways", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: g.id, enabled: d.enabled ?? g.enabled, sandbox: d.sandbox ?? g.sandbox, values: d.values ?? {} }) }); const j = await r.json(); setMsg(r.ok ? `${g.label} saved` : j.error); setDraft((x) => ({ ...x, [g.id]: {} })); load(); };
+  const post = async (body: Record<string, unknown>) => { const r = await fetch("/api/admin/gateways", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); const j = await r.json(); if (r.ok) { setList(j.gateways); setDraft({}); } return r.ok ? null : j.error; };
+  const save = async (g: GW) => { const d = draft[g.id] ?? {}; const e = await post({ id: g.id, enabled: d.enabled ?? g.enabled, sandbox: d.sandbox ?? g.sandbox, values: d.values ?? {} }); setMsg((m) => ({ ...m, [g.id]: { ok: !e, text: e ?? "Saved." } })); };
+  const fillTestAccount = async (g: GW) => { const e = await post({ id: g.id, useSandboxValues: true }); setMsg((m) => ({ ...m, [g.id]: { ok: !e, text: e ?? "Public test account filled in and test mode switched on. Press Test connection, then try a purchase from the Checkout page." } })); };
+  const test = async (g: GW) => { setBusy(g.id); const r = await fetch("/api/admin/gateways/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: g.id }) }); const j = await r.json(); setBusy(null); setMsg((m) => ({ ...m, [g.id]: { ok: !!j.ok, text: j.message } })); };
+  const chip = (st: string) => st === "live" ? "text-ok border-ok/40" : st === "test mode" ? "text-accent border-accent/40" : "text-muted";
   return (
     <div className="grid gap-3">
-      <p className="text-xs text-muted">Online payment gateways activate plans instantly and enable automatic renewal (Stripe) with no manual approval. Credentials are encrypted. Use <b>sandbox</b> to test with the provider&apos;s test credentials, then switch to live once your merchant account is approved. Aggregators (SSLCommerz, aamarPay, shurjoPay) show bKash, Nagad, Rocket, Upay, cards and banks on their page; a direct bKash merchant API is also supported. Manual bKash/Nagad/Rocket numbers (Site settings) remain available as fallback.</p>
-      {list.map((g) => { const d = draft[g.id] ?? {}; const vals = { ...g.values, ...(d.values ?? {}) }; return (
+      <p className="text-xs text-muted">Online gateways activate plans and credit packs instantly. You can add your merchant account details whenever they are ready: until then customers see manual bKash/Nagad/Rocket/bank transfer (set in <b>Site &amp; help</b>), or &quot;payments open soon&quot; if nothing is set. Credentials are stored encrypted. To try the whole flow now, press <b>Use public test account</b> on SSLCommerz: no real money moves in test mode. Gateways in test mode are shown only to staff accounts, so customers can never get a plan with a test card; untick <b>test mode</b> after entering your live merchant details.</p>
+      {!appUrlSet && <div className="card p-3 text-xs border-err/50 text-err">NEXT_PUBLIC_APP_URL is not set on the server. Set it (e.g. https://civilmate-besn.onrender.com) in Render → Environment so gateways send customers back to the right address.</div>}
+      {cb && <div className="card p-4 grid gap-1.5"><div className="text-sm font-medium mb-1">Addresses to give the gateway (merchant panel / onboarding form)</div>
+        <CopyRow label="Website" value={cb.base} /><CopyRow label="Success / fail / cancel URL" value={cb.returnUrl} /><CopyRow label="SSLCommerz IPN URL" value={cb.sslcommerzIpn} /><CopyRow label="Stripe webhook" value={cb.stripeWebhook} /><CopyRow label="Generic webhook" value={cb.genericWebhook} />
+        <div className="text-[11px] text-muted mt-1">Replace &lt;gateway&gt; with sslcommerz, aamarpay, shurjopay, bkash or stripe. The app sends these automatically with each payment; some gateways also ask for them on the application form.</div></div>}
+      {list.map((g) => { const d = draft[g.id] ?? {}; const vals = { ...g.values, ...(d.values ?? {}) }; const m = msg[g.id]; return (
         <div key={g.id} className="card p-4 grid gap-2 text-sm">
-          <div className="flex flex-wrap items-center gap-3"><span className="font-medium">{g.label}</span>{g.id === "sslcommerz" && <span className="badge text-ok border-ok/40">recommended for Bangladesh: cards + bKash + Nagad + Rocket + QR</span>}{g.fromEnv && <span className="badge">configured from environment</span>}<span className="text-xs text-muted">{g.methods}</span><a className="text-xs text-accent2" href={g.docs} target="_blank" rel="noreferrer">docs</a>
+          <div className="flex flex-wrap items-center gap-3"><span className="font-medium">{g.label}</span><span className={`badge ${chip(g.state)}`}>{g.state}</span>{g.id === "sslcommerz" && <span className="badge text-ok border-ok/40">recommended for Bangladesh: cards + bKash + Nagad + Rocket + QR</span>}{g.fromEnv && <span className="badge">configured from environment</span>}<a className="text-xs text-accent2" href={g.docs} target="_blank" rel="noreferrer">docs</a>
             <label className="ml-auto text-xs flex items-center gap-1"><input type="checkbox" checked={d.enabled ?? g.enabled} onChange={(e) => setDraft((x) => ({ ...x, [g.id]: { ...d, enabled: e.target.checked } }))} /> enabled</label>
-            <label className="text-xs flex items-center gap-1"><input type="checkbox" checked={d.sandbox ?? g.sandbox} onChange={(e) => setDraft((x) => ({ ...x, [g.id]: { ...d, sandbox: e.target.checked } }))} /> sandbox / test mode</label></div>
+            <label className="text-xs flex items-center gap-1"><input type="checkbox" checked={d.sandbox ?? g.sandbox} onChange={(e) => setDraft((x) => ({ ...x, [g.id]: { ...d, sandbox: e.target.checked } }))} /> test mode</label></div>
+          <div className="text-xs text-muted">{g.methods}</div>
           <div className="grid sm:grid-cols-2 gap-2">{g.fields.map((f) => <div key={f.key}><label className="label">{f.label}</label><input className="input mt-1" type={f.secret ? "password" : "text"} placeholder={f.placeholder} value={vals[f.key] ?? ""} onChange={(e) => setDraft((x) => ({ ...x, [g.id]: { ...d, values: { ...(d.values ?? {}), [f.key]: e.target.value } } }))} autoComplete="off" /></div>)}</div>
-          <div><button className="btn btn-sm" onClick={() => save(g)}><Save size={13} /> Save</button></div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <button className="btn btn-sm btn-primary" onClick={() => save(g)}><Save size={13} /> Save</button>
+            <button className="btn btn-sm" onClick={() => test(g)} disabled={busy === g.id || g.state === "not set up"}>{busy === g.id ? "Testing…" : "Test connection"}</button>
+            {g.hasSandboxValues && <button className="btn btn-sm" onClick={() => fillTestAccount(g)}>Use public test account</button>}
+            {m && <span className={`text-xs ${m.ok ? "text-ok" : "text-err"}`}>{m.text}</span>}
+          </div>
         </div>); })}
-      {msg && <div className="text-xs text-muted">{msg}</div>}
     </div>
   );
 }

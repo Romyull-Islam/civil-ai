@@ -4,6 +4,7 @@ import { Gateway, form, returnUrl } from "./types";
 export const sslcommerz: Gateway = {
   id: "sslcommerz",
   label: "SSLCommerz",
+  sandboxValues: { store_id: "testbox", store_passwd: "qwerty" },
   methods: "bKash, Nagad, Rocket, Upay, Bangla QR, Visa/Mastercard/Amex, internet banking",
   fields: [{ key: "store_id", label: "Store ID" }, { key: "store_passwd", label: "Store password", secret: true }],
   docs: "https://developer.sslcommerz.com/doc/v4/",
@@ -27,8 +28,17 @@ export const sslcommerz: Gateway = {
   async verify(cfg, params, ctx) {
     if (params.outcome === "cancel") return { ok: false, status: "cancelled" };
     const valId = params.val_id;
-    if (!valId) return { ok: false, status: params.outcome === "fail" ? "failed" : "invalid" };
     const base = cfg.sandbox ? "https://sandbox.sslcommerz.com" : "https://securepay.sslcommerz.com";
+    if (!valId) {
+      if (params.outcome === "fail") return { ok: false, status: "failed" };
+      // No callback data (re-check): look the transaction up by our tran_id.
+      const q = await fetch(`${base}/validator/api/merchantTransIDvalidationAPI.php?${form({ tran_id: ctx.paymentId, store_id: cfg.values.store_id, store_passwd: cfg.values.store_passwd, format: "json" })}`);
+      const qj = (await q.json()) as { element?: { status?: string; tran_id?: string; amount?: string; currency?: string; bank_tran_id?: string; val_id?: string }[] };
+      const hit = (qj.element ?? []).find((e) => (e.status === "VALID" || e.status === "VALIDATED") && e.tran_id === ctx.paymentId);
+      if (!hit) return { ok: false, status: "pending", raw: qj };
+      const ok = Number(hit.amount ?? 0) + 0.01 >= ctx.amount;
+      return { ok, status: ok ? "paid" : "invalid", txnId: hit.bank_tran_id ?? hit.val_id, amount: Number(hit.amount ?? 0), currency: hit.currency ?? ctx.currency, raw: qj };
+    }
     const r = await fetch(`${base}/validator/api/validationserverAPI.php?${form({ val_id: valId, store_id: cfg.values.store_id, store_passwd: cfg.values.store_passwd, format: "json" })}`);
     const j = (await r.json()) as { status?: string; tran_id?: string; amount?: string; currency_type?: string; bank_tran_id?: string };
     const ok = (j.status === "VALID" || j.status === "VALIDATED") && j.tran_id === ctx.paymentId && Number(j.amount ?? 0) + 0.01 >= ctx.amount;

@@ -8,12 +8,13 @@ export const ROLES: Role[] = ["superadmin", "admin", "support", "user"];
 export const isStaff = (r: Role) => r !== "user";
 
 export interface User { id: string; email: string; name: string; passwordHash: string; role: Role; plan: string; planExpires: number | null; createdAt: number; disabled: number; emailVerified: number; verifyCode: string | null; verifyExpires: number | null }
-export interface Payment { id: string; userId: string; email: string; plan: string; method: string; amount: number; currency: string; txnId: string; sender: string; status: "pending" | "approved" | "rejected"; note: string; createdAt: number; reviewedAt: number | null; seats: number }
+export interface Payment { id: string; userId: string; email: string; plan: string; method: string; amount: number; currency: string; txnId: string; sender: string; status: "pending" | "approved" | "rejected" | "refunded" | "expired"; note: string; createdAt: number; reviewedAt: number | null; seats: number; /** the gateway's own id for this checkout (session, paymentID, order id), used to re-check it later */ providerRef?: string; /** days carried over from the previous plan when this payment changed plans */ carriedDays?: number }
 export interface Team { id: string; name: string; ownerId: string; plan: string; seats: number; expires: number | null; createdAt: number }
 export interface Share { id: string; userId: string; title: string; size: number; data: string; createdAt: number; expiresAt: number; views: number }
 export interface Save { id: string; userId: string; kind: "chat" | "drawing"; title: string; size: number; data: string /* base64 gzip json */; createdAt: number; updatedAt: number }
 export interface Ticket { id: string; userId: string | null; email: string; subject: string; message: string; status: "open" | "answered" | "closed"; reply: string; createdAt: number; updatedAt: number }
 export interface Session { token: string; userId: string; expires: number }
+export interface CreditGrant { id: string; userId: string; credits: number; remaining: number; createdAt: number; expiresAt: number; paymentId: string | null; note: string }
 export interface UsageRow { day: string; requests: number; inputTokens: number; outputTokens: number; credits: number }
 
 export interface DB {
@@ -39,12 +40,24 @@ export interface DB {
   addUsageEvent(userId: string, ts: number, credits: number): Promise<void>;
   sumUsageEvents(userId: string, fromTs: number): Promise<number>;
   pruneUsageEvents(beforeTs: number): Promise<void>;
+  /** purchased extra credits (top-up packs), used only after the plan's allowance runs out */
+  addCreditGrant(g: CreditGrant): Promise<void>;
+  listCreditGrants(userId: string, now: number): Promise<CreditGrant[]>;
+  /** take up to `credits` from the user's unexpired grants, soonest-expiring first; returns what was taken */
+  consumeCreditGrants(userId: string, credits: number, now: number): Promise<number>;
+  /** cancel the unused credits of the grant bought by a payment (refund) */
+  revokeCreditGrant(paymentId: string): Promise<void>;
   usageByDay(days: number): Promise<UsageRow[]>;
   usageByUser(days: number, limit?: number): Promise<(UsageRow & { userId: string; email: string })[]>;
   setVerification(id: string, code: string | null, expires: number | null, verified?: number): Promise<void>;
   createPayment(p: Payment): Promise<void>;
   listPayments(opts: { userId?: string; status?: string; limit?: number }): Promise<Payment[]>;
-  updatePayment(id: string, patch: Partial<Pick<Payment, "status" | "note" | "reviewedAt">>): Promise<void>;
+  updatePayment(id: string, patch: Partial<Pick<Payment, "status" | "note" | "reviewedAt" | "providerRef">>): Promise<void>;
+  getPaymentByTxn(txnId: string, method?: string): Promise<Payment | null>;
+  /** move a payment from status `from` to `to` only if it is still in `from`; true if this call made the change */
+  claimPayment(id: string, from: Payment["status"], to: Payment["status"], patch?: { note?: string; reviewedAt?: number; carriedDays?: number }): Promise<boolean>;
+  /** mark online checkouts that were never completed as expired; returns how many */
+  expirePendingPayments(methods: string[], beforeTs: number): Promise<number>;
   getPayment(id: string): Promise<Payment | null>;
   createTicket(t: Ticket): Promise<void>;
   listTickets(opts: { userId?: string; status?: string; limit?: number }): Promise<Ticket[]>;
@@ -86,6 +99,8 @@ const SCHEMA = (big: string) => [
   `CREATE INDEX IF NOT EXISTS saves_user ON saves (user_id, updated_at)`,
   `CREATE TABLE IF NOT EXISTS usage_events (user_id TEXT NOT NULL, ts ${big} NOT NULL, credits_milli ${big} NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS usage_events_user ON usage_events (user_id, ts)`,
+  `CREATE TABLE IF NOT EXISTS credit_grants (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, credits_milli ${big} NOT NULL, remaining_milli ${big} NOT NULL, created_at ${big} NOT NULL, expires_at ${big} NOT NULL, payment_id TEXT, note TEXT NOT NULL DEFAULT '')`,
+  `CREATE INDEX IF NOT EXISTS credit_grants_user ON credit_grants (user_id, expires_at)`,
   `CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, user_id TEXT, email TEXT NOT NULL, subject TEXT NOT NULL, message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', reply TEXT NOT NULL DEFAULT '', created_at ${big} NOT NULL, updated_at ${big} NOT NULL)`,
 ];
 /** Additive migrations (ignored when the column already exists). */
@@ -96,11 +111,15 @@ const MIGRATIONS = (big: string) => [
   `ALTER TABLE payments ADD COLUMN seats INTEGER NOT NULL DEFAULT 1`,
   // AI credits used, stored in thousandths so both SQLite and Postgres can keep an integer column
   `ALTER TABLE usage ADD COLUMN credits_milli ${big} NOT NULL DEFAULT 0`,
+  `ALTER TABLE payments ADD COLUMN provider_ref TEXT`,
+  `ALTER TABLE payments ADD COLUMN carried_days REAL`,
+  `CREATE INDEX IF NOT EXISTS payments_txn ON payments (txn_id)`,
+  `CREATE INDEX IF NOT EXISTS payments_user ON payments (user_id, created_at)`,
 ];
 
 type Row = Record<string, unknown>;
 const toUser = (r: Row): User => ({ id: String(r.id), email: String(r.email), name: String(r.name ?? ""), passwordHash: String(r.password_hash), role: (ROLES as string[]).includes(String(r.role)) ? (r.role as Role) : "user", plan: String(r.plan), planExpires: r.plan_expires == null ? null : Number(r.plan_expires), createdAt: Number(r.created_at), disabled: Number(r.disabled ?? 0), emailVerified: Number(r.email_verified ?? 0), verifyCode: r.verify_code == null ? null : String(r.verify_code), verifyExpires: r.verify_expires == null ? null : Number(r.verify_expires) });
-const toPayment = (r: Row): Payment => ({ id: String(r.id), userId: String(r.user_id), email: String(r.email), plan: String(r.plan), method: String(r.method), amount: Number(r.amount), currency: String(r.currency), txnId: String(r.txn_id), sender: String(r.sender ?? ""), status: r.status as Payment["status"], note: String(r.note ?? ""), createdAt: Number(r.created_at), reviewedAt: r.reviewed_at == null ? null : Number(r.reviewed_at), seats: Number(r.seats ?? 1) });
+const toPayment = (r: Row): Payment => ({ id: String(r.id), userId: String(r.user_id), email: String(r.email), plan: String(r.plan), method: String(r.method), amount: Number(r.amount), currency: String(r.currency), txnId: String(r.txn_id), sender: String(r.sender ?? ""), status: r.status as Payment["status"], note: String(r.note ?? ""), createdAt: Number(r.created_at), reviewedAt: r.reviewed_at == null ? null : Number(r.reviewed_at), seats: Number(r.seats ?? 1), providerRef: r.provider_ref == null ? undefined : String(r.provider_ref), carriedDays: r.carried_days == null ? undefined : Number(r.carried_days) });
 const toTeam = (r: Row): Team => ({ id: String(r.id), name: String(r.name), ownerId: String(r.owner_id), plan: String(r.plan), seats: Number(r.seats), expires: r.expires == null ? null : Number(r.expires), createdAt: Number(r.created_at) });
 const toShare = (r: Row): Share => ({ id: String(r.id), userId: String(r.user_id), title: String(r.title), size: Number(r.size), data: String(r.data ?? ""), createdAt: Number(r.created_at), expiresAt: Number(r.expires_at), views: Number(r.views ?? 0) });
 const toSave = (r: Row): Save => ({ id: String(r.id), userId: String(r.user_id), kind: r.kind === "drawing" ? "drawing" : "chat", title: String(r.title), size: Number(r.size), data: String(r.data ?? ""), createdAt: Number(r.created_at), updatedAt: Number(r.updated_at) });
@@ -123,7 +142,7 @@ function makeDB(run: (sql: string, params?: unknown[]) => Promise<void>, all: (s
       if (!cols.length) return;
       await run(`UPDATE users SET ${cols.join(", ")} WHERE id = ?`, [...vals, id]);
     },
-    async deleteUser(id) { await run("DELETE FROM sessions WHERE user_id = ?", [id]); await run("DELETE FROM usage_events WHERE user_id = ?", [id]); await run("DELETE FROM saves WHERE user_id = ?", [id]); await run("DELETE FROM shares WHERE user_id = ?", [id]); await run("DELETE FROM team_members WHERE user_id = ?", [id]); await run("DELETE FROM users WHERE id = ?", [id]); },
+    async deleteUser(id) { await run("DELETE FROM sessions WHERE user_id = ?", [id]); await run("DELETE FROM usage_events WHERE user_id = ?", [id]); await run("DELETE FROM credit_grants WHERE user_id = ?", [id]); await run("DELETE FROM saves WHERE user_id = ?", [id]); await run("DELETE FROM shares WHERE user_id = ?", [id]); await run("DELETE FROM team_members WHERE user_id = ?", [id]); await run("DELETE FROM users WHERE id = ?", [id]); },
     async listUsers(limit = 500) { return (await all("SELECT * FROM users ORDER BY created_at DESC LIMIT ?", [limit])).map(toUser); },
     async countUsers() { return Number((await one("SELECT COUNT(*) AS n FROM users"))?.n ?? 0); },
     async createSession(s) { await run("INSERT INTO sessions (token, user_id, expires) VALUES (?,?,?)", [s.token, s.userId, s.expires]); },
@@ -136,13 +155,38 @@ function makeDB(run: (sql: string, params?: unknown[]) => Promise<void>, all: (s
     async getUsage(userId, day) { return toUsage(await one("SELECT * FROM usage WHERE user_id = ? AND day = ?", [userId, day])); },
     async addUsageEvent(userId, ts, credits) { await run("INSERT INTO usage_events (user_id, ts, credits_milli) VALUES (?,?,?)", [userId, ts, Math.round(credits * 1000)]); },
     async sumUsageEvents(userId, fromTs) { return Number((await one("SELECT COALESCE(SUM(credits_milli),0) AS c FROM usage_events WHERE user_id = ? AND ts >= ?", [userId, fromTs]))?.c ?? 0) / 1000; },
+    async addCreditGrant(g) { await run("INSERT INTO credit_grants (id, user_id, credits_milli, remaining_milli, created_at, expires_at, payment_id, note) VALUES (?,?,?,?,?,?,?,?)", [g.id, g.userId, Math.round(g.credits * 1000), Math.round(g.remaining * 1000), g.createdAt, g.expiresAt, g.paymentId, g.note]); },
+    async listCreditGrants(userId, now) { return (await all("SELECT * FROM credit_grants WHERE user_id = ? AND expires_at > ? ORDER BY expires_at", [userId, now])).map((r) => ({ id: String(r.id), userId: String(r.user_id), credits: Number(r.credits_milli) / 1000, remaining: Number(r.remaining_milli) / 1000, createdAt: Number(r.created_at), expiresAt: Number(r.expires_at), paymentId: r.payment_id == null ? null : String(r.payment_id), note: String(r.note ?? "") })); },
+    async consumeCreditGrants(userId, credits, now) {
+      let left = Math.round(credits * 1000);
+      for (const r of await all("SELECT id, remaining_milli FROM credit_grants WHERE user_id = ? AND expires_at > ? AND remaining_milli > 0 ORDER BY expires_at", [userId, now])) {
+        if (left <= 0) break;
+        const take = Math.min(left, Number(r.remaining_milli));
+        // Guarded decrement so two concurrent answers cannot spend the same credits twice.
+        const done = await all("UPDATE credit_grants SET remaining_milli = remaining_milli - ? WHERE id = ? AND remaining_milli >= ? RETURNING id", [take, r.id, take]);
+        if (done.length) left -= take;
+      }
+      return (Math.round(credits * 1000) - left) / 1000;
+    },
+    async revokeCreditGrant(paymentId) { await run("UPDATE credit_grants SET remaining_milli = 0, note = note || ' (refunded)' WHERE payment_id = ?", [paymentId]); },
     async pruneUsageEvents(beforeTs) { await run("DELETE FROM usage_events WHERE ts < ?", [beforeTs]); },
     async sumUsage(userId, fromDay) { return toUsage(await one("SELECT SUM(requests) AS requests, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(credits_milli) AS credits_milli FROM usage WHERE user_id = ? AND day >= ?", [userId, fromDay])); },
     async usageByDay(days) { return (await all("SELECT day, SUM(requests) AS requests, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(credits_milli) AS credits_milli FROM usage WHERE day >= ? GROUP BY day ORDER BY day DESC", [dayCutoff(days)])).map(toUsage); },
     async setVerification(id, code, expires, verified) { await run("UPDATE users SET verify_code = ?, verify_expires = ?" + (verified === undefined ? "" : ", email_verified = ?") + " WHERE id = ?", verified === undefined ? [code, expires, id] : [code, expires, verified, id]); },
-    async createPayment(p) { await run("INSERT INTO payments (id, user_id, email, plan, method, amount, currency, txn_id, sender, status, note, created_at, reviewed_at, seats) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [p.id, p.userId, p.email, p.plan, p.method, p.amount, p.currency, p.txnId, p.sender, p.status, p.note, p.createdAt, p.reviewedAt, p.seats ?? 1]); },
+    async createPayment(p) { await run("INSERT INTO payments (id, user_id, email, plan, method, amount, currency, txn_id, sender, status, note, created_at, reviewed_at, seats, provider_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [p.id, p.userId, p.email, p.plan, p.method, p.amount, p.currency, p.txnId, p.sender, p.status, p.note, p.createdAt, p.reviewedAt, p.seats ?? 1, p.providerRef ?? null]); },
+    async getPaymentByTxn(txnId, method) { const r = await one(`SELECT * FROM payments WHERE txn_id = ?${method ? " AND method = ?" : ""} ORDER BY created_at ASC LIMIT 1`, method ? [txnId, method] : [txnId]); return r ? toPayment(r) : null; },
+    async claimPayment(id, from, to, patch = {}) {
+      // Atomic status change: only one caller (browser return, IPN, webhook, admin) can move a payment out of `from`.
+      const r = await all("UPDATE payments SET status = ?, note = COALESCE(?, note), reviewed_at = ?, carried_days = COALESCE(?, carried_days) WHERE id = ? AND status = ? RETURNING id", [to, patch.note ?? null, patch.reviewedAt ?? Date.now(), patch.carriedDays ?? null, id, from]);
+      return r.length > 0;
+    },
+    async expirePendingPayments(methods, beforeTs) {
+      if (!methods.length) return 0;
+      const r = await all(`UPDATE payments SET status = 'expired', note = 'checkout not completed within 24 hours', reviewed_at = ? WHERE status = 'pending' AND created_at < ? AND txn_id LIKE 'CIV%' AND method IN (${methods.map(() => "?").join(",")}) RETURNING id`, [Date.now(), beforeTs, ...methods]);
+      return r.length;
+    },
     async listPayments({ userId, status, limit = 200 }) { const w: string[] = []; const v: unknown[] = []; if (userId) { w.push("user_id = ?"); v.push(userId); } if (status) { w.push("status = ?"); v.push(status); } return (await all(`SELECT * FROM payments${w.length ? " WHERE " + w.join(" AND ") : ""} ORDER BY created_at DESC LIMIT ?`, [...v, limit])).map(toPayment); },
-    async updatePayment(id, patch) { const cols: string[] = []; const vals: unknown[] = []; const map: Record<string, string> = { status: "status", note: "note", reviewedAt: "reviewed_at" }; for (const [k, val] of Object.entries(patch)) if (k in map && val !== undefined) { cols.push(`${map[k]} = ?`); vals.push(val); } if (cols.length) await run(`UPDATE payments SET ${cols.join(", ")} WHERE id = ?`, [...vals, id]); },
+    async updatePayment(id, patch) { const cols: string[] = []; const vals: unknown[] = []; const map: Record<string, string> = { status: "status", note: "note", reviewedAt: "reviewed_at", providerRef: "provider_ref" }; for (const [k, val] of Object.entries(patch)) if (k in map && val !== undefined) { cols.push(`${map[k]} = ?`); vals.push(val); } if (cols.length) await run(`UPDATE payments SET ${cols.join(", ")} WHERE id = ?`, [...vals, id]); },
     async getPayment(id) { const r = await one("SELECT * FROM payments WHERE id = ?", [id]); return r ? toPayment(r) : null; },
     async createTicket(t) { await run("INSERT INTO tickets (id, user_id, email, subject, message, status, reply, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)", [t.id, t.userId, t.email, t.subject, t.message, t.status, t.reply, t.createdAt, t.updatedAt]); },
     async listTickets({ userId, status, limit = 200 }) { const w: string[] = []; const v: unknown[] = []; if (userId) { w.push("user_id = ?"); v.push(userId); } if (status) { w.push("status = ?"); v.push(status); } return (await all(`SELECT * FROM tickets${w.length ? " WHERE " + w.join(" AND ") : ""} ORDER BY created_at DESC LIMIT ?`, [...v, limit])).map(toTicket); },

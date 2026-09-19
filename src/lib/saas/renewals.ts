@@ -41,4 +41,7 @@ export function startRenewalScheduler() {
   const tick = () => runRenewalReminders().catch(() => {});
   setTimeout(tick, 30000);
   timer = setInterval(tick, 24 * 3600000);
+  // Online checkouts whose callback never arrived: re-check every 15 minutes, expire after 24 hours.
+  const sweep = () => import("./checkout").then((m) => m.sweepPendingPayments(process.env.NEXT_PUBLIC_APP_URL ?? "")).catch(() => {});
+  setInterval(sweep, 15 * 60000).unref?.();
 }

@@ -29,6 +29,8 @@ export interface SiteSettings {
   cancellationPolicy: string; // markdown
   companyName: string;
   companyAddress: string;
+  /** shown on receipts; all optional and can be filled in later */
+  billing: { phone: string; tradeLicense: string; bin: string; vatPercent: number; pricesIncludeVat: boolean; receiptNote: string };
   terms: string; // markdown
   privacy: string; // markdown
   refundPolicy: string; // markdown
@@ -60,6 +62,7 @@ export const DEFAULT_SITE: SiteSettings = {
   cancellationPolicy: "Prepaid plans end automatically at the expiry date; there is no auto-renewal and nothing to cancel. Refund requests within 7 days of payment are considered case by case, open a support ticket with your transaction ID.",
   companyName: "",
   companyAddress: "",
+  billing: { phone: "", tradeLicense: "", bin: "", vatPercent: 0, pricesIncludeVat: true, receiptNote: "Thank you for your business. This is a computer-generated receipt and needs no signature." },
   promos: [],
   terms: `## Terms of Service
 
@@ -90,6 +93,6 @@ export const DEFAULT_SITE: SiteSettings = {
 export async function getSite(): Promise<SiteSettings> {
   const raw = await (await getDB()).getSetting("site");
   if (!raw) return DEFAULT_SITE;
-  try { const s = JSON.parse(raw) as Partial<SiteSettings>; return { ...DEFAULT_SITE, ...s, payment: { ...DEFAULT_SITE.payment, ...(s.payment ?? {}) } }; } catch { return DEFAULT_SITE; }
+  try { const s = JSON.parse(raw) as Partial<SiteSettings>; return { ...DEFAULT_SITE, ...s, payment: { ...DEFAULT_SITE.payment, ...(s.payment ?? {}) }, billing: { ...DEFAULT_SITE.billing, ...(s.billing ?? {}) } }; } catch { return DEFAULT_SITE; }
 }
 export async function setSite(s: SiteSettings) { await (await getDB()).setSetting("site", JSON.stringify(s)); }

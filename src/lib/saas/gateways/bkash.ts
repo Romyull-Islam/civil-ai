@@ -13,6 +13,7 @@ async function grantToken(cfg: { sandbox: boolean; values: Record<string, string
 export const bkash: Gateway = {
   id: "bkash",
   label: "bKash (merchant API)",
+  sandboxValues: { app_key: "4f6o0cjiki2rfm34kfdadl1eqq", app_secret: "2is7hdktrekvrbljjh44ll3d9l1dtjo4pasmjvs5vl5qr3fug4b", username: "sandboxTokenizedUser02", password: "sandboxTokenizedUser02@12345" },
   methods: "bKash wallet",
   fields: [{ key: "app_key", label: "App key" }, { key: "app_secret", label: "App secret", secret: true }, { key: "username", label: "Username" }, { key: "password", label: "Password", secret: true }],
   docs: "https://developer.bka.sh/",
@@ -26,7 +27,7 @@ export const bkash: Gateway = {
   async verify(cfg, params, ctx) {
     const paymentID = params.paymentID;
     if (params.status === "cancel") return { ok: false, status: "cancelled" };
-    if (params.status === "failure" || !paymentID) return { ok: false, status: "failed" };
+    if (params.status === "failure" || !paymentID) return { ok: false, status: params.recheck === "1" ? "pending" : "failed" };
     const token = await grantToken(cfg);
     const r = await fetch(`${base(cfg.sandbox)}/tokenized/checkout/execute`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: token, "X-App-Key": cfg.values.app_key }, body: JSON.stringify({ paymentID }) });
     let j = (await r.json()) as { statusCode?: string; statusMessage?: string; trxID?: string; transactionStatus?: string; amount?: string; merchantInvoiceNumber?: string };
@@ -35,7 +36,7 @@ export const bkash: Gateway = {
       const q = await fetch(`${base(cfg.sandbox)}/tokenized/checkout/payment/status`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: token, "X-App-Key": cfg.values.app_key }, body: JSON.stringify({ paymentID }) });
       j = (await q.json()) as typeof j;
     }
-    const ok = j.statusCode === "0000" && j.transactionStatus === "Completed" && (!j.merchantInvoiceNumber || j.merchantInvoiceNumber === ctx.paymentId);
+    const ok = j.statusCode === "0000" && j.transactionStatus === "Completed" && (!j.merchantInvoiceNumber || j.merchantInvoiceNumber === ctx.paymentId) && Number(j.amount ?? 0) + 0.5 >= Math.round(ctx.amount);
     return { ok, status: ok ? "paid" : "failed", txnId: j.trxID, amount: Number(j.amount ?? ctx.amount), currency: "BDT", raw: j };
   },
 };

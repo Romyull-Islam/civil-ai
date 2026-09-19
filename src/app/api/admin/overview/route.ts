@@ -1,5 +1,6 @@
 /** Admin/helpdesk dashboard: today's work, setup checklist and what each plan offers. */
 import { guardArea } from "@/lib/saas/admin";
+import { isOnlinePayment } from "@/lib/saas/billing";
 import { getDB } from "@/lib/saas/db";
 import { getPlans, keyStatus, totpEnabled, today } from "@/lib/saas/service";
 import { planModels } from "@/lib/saas/plans";
@@ -20,7 +21,7 @@ export const GET = guardArea("users", async (_req, actor) => {
     users: users.length,
     paidUsers: paid.length,
     newThisWeek: users.filter((u) => now - u.createdAt < 7 * 86400000).length,
-    pendingPayments: pending.length,
+    pendingPayments: pending.filter((p) => !isOnlinePayment(p)).length,
     openTickets: open.length,
     requestsToday: byDay.find((d) => d.day === today())?.requests ?? 0,
     requests7d: byDay.reduce((a, d) => a + d.requests, 0),
@@ -33,7 +34,7 @@ export const GET = guardArea("users", async (_req, actor) => {
   const keys = await keyStatus();
   const hasKey = (p: string) => p === "local" || p === "ollama" || !!(keys[p]?.set || keys[p]?.fromEnv);
   const site = await getSite();
-  const gateways = await enabledGateways();
+  const gateways = await enabledGateways(true);
   const manualPay = [site.payment.bkash, site.payment.nagad, site.payment.rocket, site.payment.bank, site.payment.qrImage].some(Boolean);
   const label = (p: string, m: string) => PROVIDERS.find((x) => x.id === p)?.models.find((x) => x.id === m)?.label;
   const planSummary = plans.map((p) => ({

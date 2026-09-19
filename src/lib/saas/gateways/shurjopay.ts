@@ -13,6 +13,7 @@ async function token(cfg: { sandbox: boolean; values: Record<string, string> }) 
 export const shurjopay: Gateway = {
   id: "shurjopay",
   label: "shurjoPay",
+  sandboxValues: { username: "sp_sandbox", password: "pyyk97hu&6u6", prefix: "NOK" },
   methods: "bKash, Nagad, Rocket, Upay, cards, internet banking",
   fields: [{ key: "username", label: "API username", placeholder: "sp_sandbox (sandbox)" }, { key: "password", label: "API password", secret: true }, { key: "prefix", label: "Prefix (given by shurjoPay)", placeholder: "NOK" }],
   docs: "https://shurjopay.com.bd/developers",

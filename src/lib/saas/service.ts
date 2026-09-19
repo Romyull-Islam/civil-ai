@@ -1,7 +1,11 @@
 import { getDB, isStaff, type User, type Role, type Team } from "./db";
 import { hashPassword, verifyPassword, newId, newToken, encrypt, decrypt } from "./crypto";
-import { DEFAULT_PLANS, planModels, withCreditDefaults, type Plan } from "./plans";
+import { DEFAULT_PLANS, DEFAULT_CREDIT_PACKS, PACK_PREFIX, planModels, withCreditDefaults, type Plan, type CreditPack } from "./plans";
 import { creditsFor } from "./credits";
+import { ONLINE_REF_PREFIX } from "./billing";
+
+/** Methods accepted for manual transfers (verified by staff). */
+export const MANUAL_METHODS = ["bkash-manual", "nagad", "rocket", "qr", "bank", "upay"];
 import { isUsable } from "@/lib/ai/quality";
 import { PROVIDERS, type KeyBag } from "@/lib/ai/registry";
 import { sendEmail, emailConfigured } from "./email";
@@ -89,11 +93,16 @@ export async function verifyEmail(user: User, code: string): Promise<boolean> {
 // ---------- manual payments (bKash / Nagad / Rocket / QR / bank) ----------
 export async function submitPayment(user: User, input: { plan: string; method: string; amount: number; currency: string; txnId: string; sender: string; seats?: number }): Promise<Payment> {
   const plans = await getPlans();
+  const isPack = input.plan.startsWith(PACK_PREFIX);
   const plan = plans.find((p) => p.id === input.plan);
-  if (!plan || plan.priceMonthly <= 0) throw new Error("Choose a paid plan");
+  if (isPack ? !(await getCreditPacks()).some((x) => PACK_PREFIX + x.id === input.plan) : !plan || plan.priceMonthly <= 0) throw new Error("Choose a paid plan or a credit pack");
   if (!input.txnId?.trim()) throw new Error("Transaction ID is required");
-  const seats = plan.perSeat ? Math.max(plan.minSeats ?? 1, Math.floor(Number(input.seats) || 0)) : 1;
-  const p: Payment = { id: newId(), userId: user.id, email: user.email, plan: plan.id, method: input.method.slice(0, 30), amount: Number(input.amount) || 0, currency: (input.currency || "BDT").slice(0, 8), txnId: input.txnId.trim().slice(0, 64), sender: (input.sender ?? "").trim().slice(0, 40), status: "pending", note: seats > 1 ? `seats=${seats}` : "", createdAt: Date.now(), reviewedAt: null, seats };
+  // Manual transfers only: online gateway ids and our own online reference format are reserved for real checkouts,
+  // so a manual claim can never be matched to someone else's online payment.
+  if (!MANUAL_METHODS.includes(input.method)) throw new Error("Choose bKash, Nagad, Rocket, Bangla QR or bank transfer");
+  if (input.txnId.trim().toUpperCase().startsWith(ONLINE_REF_PREFIX)) throw new Error("Enter the transaction ID from your bKash/Nagad/Rocket/bank message");
+  const seats = plan?.perSeat ? Math.max(plan.minSeats ?? 1, Math.floor(Number(input.seats) || 0)) : 1;
+  const p: Payment = { id: newId(), userId: user.id, email: user.email, plan: isPack ? input.plan : plan!.id, method: input.method.slice(0, 30), amount: Number(input.amount) || 0, currency: (input.currency || "BDT").slice(0, 8), txnId: input.txnId.trim().slice(0, 64), sender: (input.sender ?? "").trim().slice(0, 40), status: "pending", note: seats > 1 ? `seats=${seats}` : "", createdAt: Date.now(), reviewedAt: null, seats };
   await (await getDB()).createPayment(p);
   return p;
 }
@@ -101,12 +110,48 @@ export async function reviewPayment(id: string, status: "approved" | "rejected",
   const db = await getDB();
   const p = await db.getPayment(id);
   if (!p) return null;
-  await db.updatePayment(id, { status, note, reviewedAt: Date.now() });
+  // Only a pending payment can be reviewed, and only once: a double click or two staff members never extend a plan twice.
+  if (!(await db.claimPayment(id, "pending", status, { note }))) return db.getPayment(id);
   if (status === "approved") {
-    const r = await activatePlan(p.userId, p.plan, undefined, p.seats);
-    if (r) { const site = await getSite(); sendEmail(p.email, `${site.appName}: ${r.plan.name} plan activated`, `Your payment (${p.method} ${p.txnId}) was verified. The ${r.plan.name} plan is active until ${new Date(r.expires).toDateString()}.`).catch(() => {}); }
+    const r = await fulfilPayment(p);
+    if (r) {
+      if (r.carriedDays) await db.claimPayment(id, "approved", "approved", { carriedDays: r.carriedDays });
+      await sendPaymentConfirmation({ ...p, carriedDays: r.carriedDays }, r.label, r.until);
+    }
   }
   return db.getPayment(id);
+}
+
+/**
+ * Mark an approved payment refunded (once). With `revoke`, take back what it bought: a plan payment removes its period
+ * from the expiry (falling back to Free when nothing is left); a pack payment cancels the pack's unused credits.
+ */
+export async function refundPayment(id: string, revoke: boolean, note = ""): Promise<Payment | null> {
+  const db = await getDB();
+  const p = await db.getPayment(id);
+  if (!p) return null;
+  if (!(await db.claimPayment(id, "approved", "refunded", { note: `refunded${note ? `: ${note}` : ""}` }))) return p;
+  if (revoke) {
+    if (p.plan.startsWith(PACK_PREFIX)) await db.revokeCreditGrant(p.id);
+    else {
+      const user = await db.getUserById(p.userId);
+      const plan = (await getPlans()).find((x) => x.id === p.plan);
+      if (user && plan && user.plan === p.plan && user.planExpires) {
+        const expires = user.planExpires - ((plan.periodDays ?? 30) + (p.carriedDays ?? 0)) * 86400000;
+        await db.updateUser(user.id, expires > Date.now() ? { planExpires: expires } : { plan: "free", planExpires: null });
+      }
+    }
+  }
+  return db.getPayment(id);
+}
+
+/** Email the customer that the plan is active, with a link to the receipt. */
+export async function sendPaymentConfirmation(p: Payment, label: string, until: number) {
+  const site = await getSite();
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const carried = p.carriedDays ? `\n${p.carriedDays} days from your previous plan were carried over.` : "";
+  await sendEmail(p.email, `${site.appName}: payment received, ${label} active`,
+    `Thank you. We received ${p.currency} ${p.amount} (${p.method}, ref ${p.txnId}).\nYour ${label} is active until ${new Date(until).toDateString()}.${carried}\n\nReceipt: ${base}/billing/receipt/${p.id}\nBilling and history: ${base}/billing`).catch(() => {});
 }
 
 // ---------- support tickets ----------
@@ -159,6 +204,29 @@ export async function getPlans(): Promise<Plan[]> {
   try { const p = JSON.parse(raw) as Plan[]; return Array.isArray(p) && p.length ? p.map(withCreditDefaults) : DEFAULT_PLANS; } catch { return DEFAULT_PLANS; }
 }
 export async function setPlans(plans: Plan[]) { await (await getDB()).setSetting("plans", JSON.stringify(plans)); }
+export async function getCreditPacks(): Promise<CreditPack[]> {
+  const raw = await (await getDB()).getSetting("creditPacks");
+  try { const p = raw ? (JSON.parse(raw) as CreditPack[]) : null; return Array.isArray(p) ? p : DEFAULT_CREDIT_PACKS; } catch { return DEFAULT_CREDIT_PACKS; }
+}
+export async function setCreditPacks(packs: CreditPack[]) { await (await getDB()).setSetting("creditPacks", JSON.stringify(packs)); }
+
+/** Add a purchased (or admin-given) credit pack to a user's balance. */
+export async function grantCredits(userId: string, credits: number, validityDays: number, paymentId: string | null, note: string) {
+  const now = Date.now();
+  await (await getDB()).addCreditGrant({ id: newId(), userId, credits, remaining: credits, createdAt: now, expiresAt: now + validityDays * 86400000, paymentId, note });
+}
+
+/** Deliver what a payment bought: a plan period, or an extra-credit pack. */
+export async function fulfilPayment(p: Payment): Promise<{ label: string; until: number; carriedDays: number } | null> {
+  if (p.plan.startsWith(PACK_PREFIX)) {
+    const pack = (await getCreditPacks()).find((x) => x.id === p.plan.slice(PACK_PREFIX.length));
+    if (!pack) return null;
+    await grantCredits(p.userId, pack.credits, pack.validityDays, p.id, pack.name);
+    return { label: `${pack.name} (${pack.credits} extra AI credits)`, until: Date.now() + pack.validityDays * 86400000, carriedDays: 0 };
+  }
+  const r = await activatePlan(p.userId, p.plan, undefined, p.seats);
+  return r ? { label: `${r.plan.name} plan`, until: r.expires, carriedDays: r.carriedDays } : null;
+}
 
 export async function planFor(user: User): Promise<Plan> {
   const plans = await getPlans();
@@ -185,12 +253,30 @@ export function renewalState(user: User, plan: Plan): { status: "none" | "ok" | 
 }
 
 /** Activate/extend a plan (used by manual approval and payment webhooks). Extends from the current expiry when still active. */
-export async function activatePlan(userId: string, planId: string, days?: number, seats?: number): Promise<{ expires: number; plan: Plan } | null> {
+/**
+ * Days carried over when a user with an active paid plan buys a different plan: the unused part of the old plan is
+ * valued at its own daily price and converted into days of the new plan (upgrades get fewer, downgrades more).
+ * Team (per-seat) plans and renewals of the same plan are not converted (renewals simply extend the expiry).
+ */
+export function carryOverDays(current: { plan: Plan | undefined; expires: number | null }, next: Plan, now = Date.now()): number {
+  const old = current.plan;
+  if (!old || old.id === next.id || !current.expires || current.expires <= now || old.priceMonthly <= 0 || next.priceMonthly <= 0 || old.perSeat || next.perSeat) return 0;
+  const remainingDays = (current.expires - now) / 86400000;
+  const oldPerDay = old.priceMonthly / (old.periodDays ?? 30);
+  const newPerDay = next.priceMonthly / (next.periodDays ?? 30);
+  return Math.floor(((remainingDays * oldPerDay) / newPerDay) * 10) / 10;
+}
+
+export async function activatePlan(userId: string, planId: string, days?: number, seats?: number): Promise<{ expires: number; plan: Plan; carriedDays: number } | null> {
   const db = await getDB();
-  const plan = (await getPlans()).find((x) => x.id === planId);
+  const plans = await getPlans();
+  const plan = plans.find((x) => x.id === planId);
   const user = await db.getUserById(userId);
   if (!plan || !user) return null;
-  const base = user.plan === plan.id && user.planExpires && user.planExpires > Date.now() ? user.planExpires : Date.now();
+  const now = Date.now();
+  const sameAndActive = user.plan === plan.id && user.planExpires && user.planExpires > now;
+  const carriedDays = sameAndActive ? 0 : carryOverDays({ plan: plans.find((x) => x.id === user.plan), expires: user.planExpires }, plan, now);
+  const base = sameAndActive ? user.planExpires! : now + carriedDays * 86400000;
   const expires = base + (days ?? plan.periodDays ?? 30) * 86400000;
   await db.updateUser(user.id, { plan: plan.id, planExpires: expires });
   if (plan.perSeat) {
@@ -198,9 +284,9 @@ export async function activatePlan(userId: string, planId: string, days?: number
     const n = Math.max(plan.minSeats ?? 1, seats ?? plan.minSeats ?? 1);
     const team = await db.getTeamByOwner(user.id);
     if (team) await db.updateTeam(team.id, { plan: plan.id, seats: n, expires });
-    else await db.createTeam({ id: newId(), name: `${user.name || user.email}'s team`, ownerId: user.id, plan: plan.id, seats: n, expires, createdAt: Date.now() });
+    else await db.createTeam({ id: newId(), name: `${user.name || user.email}'s team`, ownerId: user.id, plan: plan.id, seats: n, expires, createdAt: now });
   }
-  return { expires, plan };
+  return { expires, plan, carriedDays };
 }
 
 // ---------- server-held provider keys (admin) ----------
@@ -237,7 +323,11 @@ export interface Quota {
   session: Allowance;
   week: Allowance;
   period: Allowance & { start: string };
-  /** credits that can still be spent now: the smallest of the three allowances */
+  /** what the plan still allows now: the smallest of the three allowances */
+  allowanceRemaining: number;
+  /** purchased extra credits (used only once the allowance is used up) */
+  extra: { balance: number; nextExpiry: number | null };
+  /** credits that can be spent now: the plan allowance plus extra credits */
   remaining: number;
   /** which allowance is used up (the one that refills last), or null */
   blockedBy: "session" | "week" | "period" | null;
@@ -286,11 +376,13 @@ export async function quota(user: User, now = Date.now()): Promise<Quota> {
   const week = weekWindow(pStart, pEnd, now);
   const hours = plan.sessionHours ?? 5;
   const sStart = await activeSessionStart(user.id, hours, now);
-  const [period, weekUsed, sessionUsed] = await Promise.all([
+  const [period, weekUsed, sessionUsed, grants] = await Promise.all([
     db.sumUsage(user.id, pStart),
     db.sumUsageEvents(user.id, week.start),
     sStart ? db.sumUsageEvents(user.id, sStart) : Promise.resolve(0),
+    db.listCreditGrants(user.id, now),
   ]);
+  const live = grants.filter((g) => g.remaining > 0);
   const staff = isStaff(user.role);
   const lim = (n: number) => (staff ? Infinity : n);
   const q: Quota = {
@@ -298,11 +390,14 @@ export async function quota(user: User, now = Date.now()): Promise<Quota> {
     session: { used: sessionUsed, limit: lim(plan.sessionCredits), resetsAt: sStart ? sStart + hours * 3600000 : null },
     week: { used: weekUsed, limit: lim(plan.weeklyCredits), resetsAt: week.end },
     period: { used: period.credits, limit: lim(plan.monthlyCredits), resetsAt: pEnd, start: pStart },
+    allowanceRemaining: 0,
+    extra: { balance: live.reduce((s, g) => s + g.remaining, 0), nextExpiry: live[0]?.expiresAt ?? null },
     remaining: 0,
     blockedBy: null,
   };
-  q.remaining = Math.max(0, Math.min(q.session.limit - q.session.used, q.week.limit - q.week.used, q.period.limit - q.period.used));
-  if (q.remaining <= 0) q.blockedBy = q.period.used >= q.period.limit ? "period" : q.week.used >= q.week.limit ? "week" : "session";
+  q.allowanceRemaining = Math.max(0, Math.min(q.session.limit - q.session.used, q.week.limit - q.week.used, q.period.limit - q.period.used));
+  q.remaining = q.allowanceRemaining + q.extra.balance;
+  if (q.allowanceRemaining <= 0) q.blockedBy = q.period.used >= q.period.limit ? "period" : q.week.used >= q.week.limit ? "week" : "session";
   return q;
 }
 
@@ -311,7 +406,7 @@ export function publicUsage(q: Quota) {
   const r = (n: number) => Math.round(n * 10) / 10;
   const a = (x: Allowance) => ({ used: r(x.used), limit: Number.isFinite(x.limit) ? x.limit : null, resetsAt: x.resetsAt });
   const unlimited = !Number.isFinite(q.period.limit);
-  return { remaining: unlimited ? null : r(q.remaining), blockedBy: q.blockedBy, session: a(q.session), week: a(q.week), period: { ...a(q.period), start: q.period.start }, sessionHours: q.plan.sessionHours ?? 5 };
+  return { remaining: unlimited ? null : r(q.remaining), allowanceRemaining: unlimited ? null : r(q.allowanceRemaining), blockedBy: q.blockedBy, session: a(q.session), week: a(q.week), period: { ...a(q.period), start: q.period.start }, sessionHours: q.plan.sessionHours ?? 5, extra: { balance: r(q.extra.balance), nextExpiry: q.extra.nextExpiry } };
 }
 
 /** Human time in Bangladesh, e.g. "Tue 23 Sep, 11:40". */
@@ -320,9 +415,10 @@ export const bdTime = (ms: number) => new Date(ms).toLocaleString("en-GB", { tim
 /** The message shown when a user has no credits left, naming the limit and when it refills. */
 export function limitMessage(q: Quota): string {
   const when = (ms: number | null) => (ms ? bdTime(ms) : "soon");
-  if (q.blockedBy === "period") return `You have used this period's ${q.period.limit} AI credits on the ${q.plan.name} plan. They refill on ${when(q.period.resetsAt)} (Bangladesh time), or upgrade for more. Calculators, drawings and the code library stay available.`;
-  if (q.blockedBy === "week") return `You have reached this week's limit of ${q.week.limit} AI credits on the ${q.plan.name} plan. It refills on ${when(q.week.resetsAt)} (Bangladesh time); your monthly credits are kept. Calculators, drawings and the code library stay available.`;
-  return `You have reached the ${q.session.limit}-credit limit for this ${q.plan.sessionHours ?? 5}-hour session on the ${q.plan.name} plan. A new session starts at ${when(q.session.resetsAt)} (Bangladesh time); your weekly and monthly credits are kept.`;
+  const buy = " You can also buy extra credits on the Billing page to continue now.";
+  if (q.blockedBy === "period") return `You have used this period's ${q.period.limit} AI credits on the ${q.plan.name} plan. They refill on ${when(q.period.resetsAt)} (Bangladesh time), or upgrade for more.${buy} Calculators, drawings and the code library stay available.`;
+  if (q.blockedBy === "week") return `You have reached this week's limit of ${q.week.limit} AI credits on the ${q.plan.name} plan. It refills on ${when(q.week.resetsAt)} (Bangladesh time); your monthly credits are kept.${buy} Calculators, drawings and the code library stay available.`;
+  return `You have reached the ${q.session.limit}-credit limit for this ${q.plan.sessionHours ?? 5}-hour session on the ${q.plan.name} plan. A new session starts at ${when(q.session.resetsAt)} (Bangladesh time); your weekly and monthly credits are kept.${buy}`;
 }
 
 /** Charge one model call: credits by that model's price and real token use (see credits.ts). `newRequest` counts a user question. */
@@ -331,6 +427,12 @@ export async function recordUsage(userId: string, provider: string, model: strin
   const credits = creditsFor(provider, model, inputTokens, outputTokens);
   const user = await db.getUserById(userId);
   const hours = user ? ((await planFor(user)).sessionHours ?? 5) : 5;
+  // Whatever the plan allowance cannot cover is taken from purchased extra credits.
+  if (user && !isStaff(user.role) && credits > 0) {
+    const q = await quota(user, now);
+    const overflow = credits - Math.max(0, q.allowanceRemaining);
+    if (overflow > 0 && q.extra.balance > 0) await db.consumeCreditGrants(userId, overflow, now);
+  }
   if (!(await activeSessionStart(userId, hours, now))) await db.setSetting(sessionKey(userId), String(now));
   await Promise.all([db.addUsage(userId, new Date(now).toISOString().slice(0, 10), newRequest ? 1 : 0, inputTokens, outputTokens, credits), db.addUsageEvent(userId, now, credits)]);
   // Session and weekly windows never look back more than 7 days.
