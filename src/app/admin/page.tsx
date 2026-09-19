@@ -14,7 +14,7 @@ import type { Plan } from "@/lib/saas/plans";
 
 type Tab = "overview" | "promos" | "users" | "keys" | "plans" | "usage" | "payments" | "support" | "site" | "gateways" | "teams" | "company";
 type Role = "superadmin" | "admin" | "support" | "user";
-interface AdminUser { id: string; email: string; name: string; role: Role; plan: string; planExpires: number | null; createdAt: number; disabled: number }
+interface AdminUser { id: string; email: string; name: string; role: Role; plan: string; planExpires: number | null; createdAt: number; disabled: number; emailVerified?: number }
 const TAB_ROLES: Record<Tab, Role[]> = { overview: ["superadmin", "admin", "support"], promos: ["superadmin", "admin"], gateways: ["superadmin", "admin"], teams: ["superadmin", "admin", "support"], users: ["superadmin", "admin", "support"], payments: ["superadmin", "admin", "support"], support: ["superadmin", "admin", "support"], keys: ["superadmin", "admin"], plans: ["superadmin", "admin"], site: ["superadmin", "admin"], usage: ["superadmin", "admin"], company: ["superadmin", "admin"] };
 const GROUPS: { title: string; items: [Tab, typeof Users, string][] }[] = [
   { title: "", items: [["overview", LayoutDashboard, "Overview"]] },
@@ -163,7 +163,7 @@ function UsersTab({ me, company = false }: { me: { id: string; role: Role }; com
         <thead><tr className="text-left text-xs text-muted"><th className="py-1">User</th><th>Role</th>{!company && <><th>Plan</th><th>Expires</th></>}<th>Joined</th><th>Status</th></tr></thead>
         <tbody>{list.map((u) => (
           <tr key={u.id} className="border-t border-border">
-            <td className="py-1.5">{u.name || "(no name)"}<div className="text-xs text-muted">{u.email}</div></td>
+            <td className="py-1.5">{u.name || "(no name)"}<div className="text-xs text-muted">{u.email}</div>{!u.emailVerified && <div className="text-[11px]"><span className="text-err">email not verified</span> <button className="underline text-accent2" onClick={() => patch(u.id, { emailVerified: 1 })}>mark verified</button></div>}</td>
             <td>{superadmin && u.id !== me.id ? <select className="select !w-auto !py-0.5" value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })}><option value="user">user</option><option value="support">support</option><option value="admin">admin</option><option value="superadmin">superadmin</option></select> : <span className="badge">{u.role}</span>}</td>
             {!company && <><td><select className="select !w-auto !py-0.5" value={u.plan} onChange={(e) => patch(u.id, { plan: e.target.value })}>{plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></td>
             <td><input className="input !w-40 !py-0.5" type="date" value={u.planExpires ? new Date(u.planExpires).toISOString().slice(0, 10) : ""} onChange={(e) => patch(u.id, { planExpires: e.target.value ? new Date(e.target.value).getTime() : null })} /></td></>}

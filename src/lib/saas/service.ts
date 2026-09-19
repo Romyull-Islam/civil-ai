@@ -57,7 +57,8 @@ export async function signup(email: string, password: string, name = ""): Promis
   const code = needVerify ? String(Math.floor(100000 + Math.random() * 900000)) : null;
   const user: User = { id: newId(), email: email.toLowerCase(), name: name.trim().slice(0, 80), passwordHash: hashPassword(password), role, plan: "free", planExpires: null, createdAt: Date.now(), disabled: 0, emailVerified: needVerify && role === "user" ? 0 : 1, verifyCode: code, verifyExpires: code ? Date.now() + 30 * 60000 : null };
   await db.createUser(user);
-  if (code && !user.emailVerified) await sendVerificationEmail(user, code);
+  // Never keep the visitor waiting on the mail server: wait at most 12 s, then let delivery finish in the background.
+  if (code && !user.emailVerified) await Promise.race([sendVerificationEmail(user, code).catch(() => null), new Promise((r) => setTimeout(r, 12000))]);
   const token = newToken();
   await db.createSession({ token, userId: user.id, expires: Date.now() + SESSION_DAYS * 86400000 });
   return { user, token };
@@ -73,7 +74,7 @@ export async function verificationRequired(): Promise<boolean> {
 }
 async function sendVerificationEmail(user: User, code: string) {
   const site = await getSite();
-  await sendEmail(user.email, `${site.appName}: your verification code ${code}`, `Hello ${user.name || ""}
+  return sendEmail(user.email, `${site.appName}: your verification code ${code}`, `Hello ${user.name || ""}
 
 Your ${site.appName} verification code is: ${code}
 It expires in 30 minutes.
@@ -84,7 +85,8 @@ export async function resendVerification(user: User) {
   if (user.emailVerified) return;
   const code = String(Math.floor(100000 + Math.random() * 900000));
   await (await getDB()).setVerification(user.id, code, Date.now() + 30 * 60000);
-  await sendVerificationEmail(user, code);
+  const r = await Promise.race([sendVerificationEmail(user, code).catch(() => ({ delivered: false, via: "error" })), new Promise<null>((res) => setTimeout(() => res(null), 12000))]);
+  if (r && !r.delivered) throw new Error("We could not send the email right now. Please try again in a few minutes, or contact support.");
 }
 export async function verifyEmail(user: User, code: string): Promise<boolean> {
   if (user.emailVerified) return true;

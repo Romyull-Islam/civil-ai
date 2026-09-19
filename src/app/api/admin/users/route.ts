@@ -11,7 +11,7 @@ export const GET = guardArea("users", async () => { const db = await getDB(); re
 
 /** Plan/expiry/disable/password: staff. Role changes: superadmin only. */
 export const PATCH = guardArea("users", async (req, actor) => {
-  const { id, plan, role, planExpires, disabled, password } = (await req.json()) as { id: string; plan?: string; role?: Role; planExpires?: number | null; disabled?: number; password?: string };
+  const { id, plan, role, planExpires, disabled, password, emailVerified } = (await req.json()) as { id: string; plan?: string; role?: Role; planExpires?: number | null; disabled?: number; password?: string; emailVerified?: number };
   const db = await getDB();
   const target = await db.getUserById(id);
   if (!target) return Response.json({ error: "Not found" }, { status: 404 });
@@ -24,6 +24,8 @@ export const PATCH = guardArea("users", async (req, actor) => {
   if (disabled && target.id === actor.id) return Response.json({ error: "You cannot disable yourself" }, { status: 400 });
   if (isCompany() && disabled === 0 && target.disabled) { try { await assertSeatAvailable(); } catch (e) { return Response.json({ error: (e as Error).message }, { status: 400 }); } }
   await db.updateUser(id, { plan, role, planExpires, disabled, passwordHash: password ? hashPassword(password) : undefined });
+  // Staff can confirm an address by hand (e.g. the code email could not be delivered).
+  if (emailVerified === 1 && !target.emailVerified) { await db.setVerification(id, null, null, 1); await audit(actor.id, "user.verify", target.email, "marked verified by staff"); }
   await audit(actor.id, "user.update", target.email, JSON.stringify({ plan, role, planExpires, disabled, password: password ? "changed" : undefined }));
   const u = await db.getUserById(id);
   return Response.json({ user: u ? publicUser(u) : null });

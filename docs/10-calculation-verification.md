@@ -238,10 +238,10 @@ The Indian NBC 2016 room sizes are available as an option.
 - Indiana Example 44-3.2
 - Engineering Hulk and Mathalino
 
-**Values supplied from general knowledge**, each marked in the code; please check:
-- IRC friction factors by speed (0.40 to 0.35)
-- the relative gradient at 130 km/h (from WYDOT)
-- the AASHTO sag comfort length AV²/395, shown for information only
+**Values checked against sources (September 2026)**
+- **IRC friction factors for SSD:** these equal NPTEL Chapter 13, Table 13.1 (after IRC): 0.40 up to 30 km/h, 0.38 at 40, 0.37 at 50, 0.36 at 60 and 0.35 from 80 km/h. NPTEL's worked example uses 0.36 at 65 km/h. A test covers this.
+- **Maximum relative gradient:** only the Indiana Figure 43-3E values (20–120 km/h) are used, and US speeds up to 75 mph at the equivalent values. Above that, the designer enters the value from their DOT manual. State tables differ (for example TxDOT RDM Table 4-8 and Iowa DOT Table 2B.2), so no national value is assumed. The unverified 130 km/h / 80 mph value was removed.
+- **Sag comfort length:** the AASHTO comfort formula was removed because no source was found. The output instead states the TxDOT rule (Roadway Design Manual 4.8.2): comfort lengths are about 50% of the headlight lengths and are for special cases only. The IRC comfort formula is kept; NPTEL Chapter 18's worked example (73.1 m) verifies it.
 
 ### Pavements: `pavement.ts` (37 tests)
 
@@ -258,7 +258,7 @@ The Indian NBC 2016 room sizes are available as an option.
 
 **RHD Pavement Design Guide 2005 catalogue**
 - The Appendix 2 example reproduces: 40 + 90 mm asphalt, 250 mm base Type I, 200 mm sub-base and 300 mm improved subgrade.
-- **Improved subgrade:** the guide's Table 6 and Appendix 1 conflict. The conservative Appendix values are the default, and Table 6 can be selected instead.
+- **Improved subgrade:** the guide's Table 6 (250/150/100 mm on CBR 2/3/4 %) conflicts with its Appendix 1 (300/250/200 mm on CBR 3/4/5 %). The guide's own worked example (Appendix 2, CBR 3 %) specifies 300 mm, which matches Appendix 1; Table 6 would give 150 mm. Appendix 1 is therefore the default, and a test covers this. Table 6 remains selectable.
 
 ### Concrete mix design: `mixdesign.ts` (36 tests)
 
@@ -272,7 +272,10 @@ The Indian NBC 2016 room sizes are available as an option.
   - ACI 211.1 Appendix 2 (SI)
   - ACI 211.1 Examples 1 and 2 (inch-pound)
   - PCA EB001 Example 1, using PCA's own rules as input overrides
-- **The psi constants for f'cr are from ACI 301 / 318 practice and were not read from a source document.** They are +1000 psi, +1200 psi, and 1.10f'c + 700 psi; and −500 psi with test data. Please confirm.
+- **f'cr in psi:** verified against PCA EB001 (14th ed.), Table 9-11 (inch-pound) and Eq. 9-1 to 9-3, which are adapted from ACI 318. Three PCA worked examples are tests:
+  - Example 1: 3500 psi with no data gives 4700 psi.
+  - Example 4: 4000 psi with s = 300 psi gives 4402 psi.
+  - Metric example: 35 MPa with s = 2.0 MPa gives 37.7 MPa.
 
 **IS 10262:2019 with IS 456 durability**
 - The Annex A M40 example reproduces.

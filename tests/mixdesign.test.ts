@@ -299,3 +299,25 @@ describe("mix tools (MIX_TOOLS)", () => {
     expect(out.summary).toMatch(/IS 10262:2019.*All checks pass/);
   });
 });
+
+describe("required average strength: PCA EB001 (14th ed.) worked examples", () => {
+  // Table 9-11 (inch-pound) and Eq. 9-1 to 9-3, adapted from ACI 318.
+  it("Example 1 (inch-pound): f'c 3500 psi, no test data → f'c + 1200 = 4700 psi", () => {
+    expect(requiredAverageStrength({ code: "ACI318", units: "US", fc: 3500 }).fcr).toBe(4700);
+  });
+  it("Example 4 (inch-pound): f'c 4000 psi, s = 300 psi → larger of 4402 and 4199 psi", () => {
+    const r = requiredAverageStrength({ code: "ACI318", units: "US", fc: 4000, stdDev: 300, numTests: 30 });
+    expect(r.fcr).toBeCloseTo(4402, 6);
+    expect(r.rule).toMatch(/4199/);
+  });
+  it("metric example: f'c 35 MPa, s = 2.0 MPa → larger of 37.7 and 36.2 MPa", () => {
+    const r = requiredAverageStrength({ code: "ACI318", fc: 35, stdDev: 2.0, numTests: 30 });
+    expect(r.fcr).toBeCloseTo(37.68, 6);
+  });
+  it("Table 9-11 bands: < 3000 psi +1000, 3000–5000 +1200, > 5000 1.10f'c + 700; Eq. 9-3 above 5000 psi", () => {
+    expect(requiredAverageStrength({ code: "ACI318", units: "US", fc: 2500 }).fcr).toBe(3500);
+    expect(requiredAverageStrength({ code: "ACI318", units: "US", fc: 5000 }).fcr).toBe(6200);
+    expect(requiredAverageStrength({ code: "ACI318", units: "US", fc: 6000 }).fcr).toBeCloseTo(7300, 6);
+    expect(requiredAverageStrength({ code: "ACI318", units: "US", fc: 6000, stdDev: 500, numTests: 30 }).fcr).toBeCloseTo(Math.max(6000 + 1.34 * 500, 0.9 * 6000 + 2.33 * 500), 6);
+  });
+});

@@ -255,10 +255,15 @@ export const AASHTO_RUNNING_SPEED: Record<Units, readonly (readonly [number, num
   SI: [[20, 20], [30, 30], [40, 40], [50, 47], [60, 55], [70, 63], [80, 70], [90, 77], [100, 85], [110, 91], [120, 98]],
   US: [[15, 15], [20, 20], [25, 24], [30, 28], [35, 32], [40, 36], [45, 40], [50, 44], [55, 48], [60, 52], [65, 55], [70, 58], [75, 61], [80, 64]],
 };
-/** Maximum relative gradient Δ (%) for superelevation runoff (two-lane, rotated about the centreline; Indiana Fig. 43-3E; 130 km/h per WYDOT RDM 3-02). */
+/**
+ * Maximum relative gradient Δ (%) for superelevation runoff (two-lane, rotated about the centreline).
+ * SI: Indiana Design Manual (metric) Figure 43-3E (2008), 20–120 km/h, as printed. US: the same values at the equivalent
+ * speeds up to 75 mph (≈ 120 km/h; a test checks the equivalence). Above that, or where a state DOT has its own table
+ * (e.g. TxDOT RDM Table 4-8, Iowa DOT Table 2B.2 use different values), the designer enters Δ.
+ */
 export const AASHTO_RELATIVE_GRADIENT: Record<Units, readonly (readonly [number, number])[]> = {
-  SI: [[20, 0.8], [30, 0.75], [40, 0.7], [50, 0.65], [60, 0.6], [70, 0.55], [80, 0.5], [90, 0.47], [100, 0.44], [110, 0.41], [120, 0.38], [130, 0.35]],
-  US: [[15, 0.78], [20, 0.74], [25, 0.7], [30, 0.66], [35, 0.62], [40, 0.58], [45, 0.54], [50, 0.5], [55, 0.47], [60, 0.45], [65, 0.43], [70, 0.4], [75, 0.38], [80, 0.35]],
+  SI: [[20, 0.8], [30, 0.75], [40, 0.7], [50, 0.65], [60, 0.6], [70, 0.55], [80, 0.5], [90, 0.47], [100, 0.44], [110, 0.41], [120, 0.38]],
+  US: [[15, 0.78], [20, 0.74], [25, 0.7], [30, 0.66], [35, 0.62], [40, 0.58], [45, 0.54], [50, 0.5], [55, 0.47], [60, 0.45], [65, 0.43], [70, 0.4], [75, 0.38]],
 };
 /** Multilane runoff adjustment factor bw by number of lanes rotated (Indiana Fig. 43-3G). */
 export const AASHTO_BW: readonly (readonly [number, number])[] = [[1, 1], [1.5, 0.83], [2, 0.75], [2.5, 0.7], [3, 0.67], [3.5, 0.64]];
@@ -318,12 +323,15 @@ export function aashtoMaxSpeedForRadius(R: number, e: number, u: Units = "SI") {
  * AASHTO superelevation runoff Lr = w·n1·e·bw/Δ (Indiana Eq. 43-3.1/43-3.3; e and Δ in %) and tangent runout
  * TR = Lr·eNC/e (Eq. 43-3.2). Default lane 3.6 m (12 ft), one lane rotated each side of the centreline.
  */
-export function aashtoRunoff(V: number, ePct: number, u: Units = "SI", opts: { laneWidth?: number; lanesRotated?: number; normalCrossSlope?: number } = {}) {
+export function aashtoRunoff(V: number, ePct: number, u: Units = "SI", opts: { laneWidth?: number; lanesRotated?: number; normalCrossSlope?: number; relativeGradient?: number } = {}) {
   const w = opts.laneWidth ?? (u === "US" ? 12 : 3.6);
   const n1 = opts.lanesRotated ?? 1;
   const eNC = opts.normalCrossSlope ?? 2;
   need(n1 >= 1 && n1 <= 3.5, "Lanes rotated must be 1 to 3.5");
-  const d = aashtoTable(AASHTO_RELATIVE_GRADIENT[u], V, u, "relative gradient").value;
+  const top = AASHTO_RELATIVE_GRADIENT[u].at(-1)![0];
+  need(opts.relativeGradient !== undefined || V <= top + 1e-9, `No verified AASHTO relative gradient above ${top} ${u === "US" ? "mph" : "km/h"}: enter the maximum relative gradient Δ (%) from your DOT's design manual`);
+  if (opts.relativeGradient !== undefined) need(opts.relativeGradient > 0 && opts.relativeGradient <= 2, "Relative gradient Δ must be between 0 and 2 %");
+  const d = opts.relativeGradient ?? aashtoTable(AASHTO_RELATIVE_GRADIENT[u], V, u, "relative gradient").value;
   const bw = interpTable(AASHTO_BW, n1).value;
   const Lr = (w * n1 * ePct * bw) / d;
   const TR = ePct > 0 ? (Lr * eNC) / ePct : 0;
@@ -434,6 +442,8 @@ export interface RadiusSuperelevationInput {
   sightDistanceType?: SightType;
   roadClass?: "upazila" | "union" | "village";
   laneWidth?: number;
+  /** AASHTO runoff: maximum relative gradient Δ (%) from the DOT manual (required above 120 km/h / 75 mph) */
+  relativeGradient?: number;
   lanesRotated?: number;
   normalCrossSlope?: number; // %
 }
@@ -481,7 +491,7 @@ export function radiusSuperelevation(inp: RadiusSuperelevationInput) {
         checks.push({ name: "Radius ≥ Rmin", ok: !m5.exceedsEmax, detail: `R = ${R} ${lu} vs Rmin = ${f1(m5.Rmin)} ${lu} at emax ${pct(emax, 0)}` });
         Object.assign(out, { superelevation: e, superelevationDesign: eDesign, crown, sideFrictionUsed: m5.f });
         if (eDesign > 0) {
-          const ro = aashtoRunoff(V, eDesign * 100, u, { laneWidth: inp.laneWidth, lanesRotated: inp.lanesRotated, normalCrossSlope: inp.normalCrossSlope });
+          const ro = aashtoRunoff(V, eDesign * 100, u, { laneWidth: inp.laneWidth, lanesRotated: inp.lanesRotated, normalCrossSlope: inp.normalCrossSlope, relativeGradient: inp.relativeGradient });
           steps.push(`Runoff Lr = w·n1·e·bw/Δ = ${ro.laneWidth}×${ro.lanesRotated}×${f1(eDesign * 100)}×${ro.bw}/${ro.relativeGradient} = ${f1(ro.runoff)} ${lu} (Indiana Eq. 43-3.1/43-3.3)`);
           steps.push(`Tangent runout TR = Lr·eNC/e = ${f1(ro.runoff)}×${inp.normalCrossSlope ?? 2}/${f1(eDesign * 100)} = ${f1(ro.tangentRunout)} ${lu}; place about 2/3 of Lr (${f1(ro.onTangent)} ${lu}, range 60–80%) on the tangent before the PC`);
           out.runoff = ro;
@@ -636,7 +646,7 @@ export function radiusSuperelevation(inp: RadiusSuperelevationInput) {
 
 // ---------------- Sight distance ----------------
 
-/** IRC:66 / IRC:SP:23 longitudinal friction coefficient for SSD by design speed (km/h). */
+/** IRC longitudinal friction for SSD: NPTEL Ch. 13 Table 13.1 (after IRC): ≤30 km/h 0.40, 40 0.38, 50 0.37, 60 0.36, ≥80 0.35; 65 km/h 0.36 as used in the NPTEL worked example. */
 export const IRC_SSD_FRICTION: readonly (readonly [number, number])[] = [[20, 0.4], [25, 0.4], [30, 0.4], [40, 0.38], [50, 0.37], [60, 0.36], [65, 0.36], [80, 0.35], [100, 0.35]];
 /** RHD Table 2.3 sight distances (m): [SSD, ISD, OSD] for two-lane roads; single-lane roads use the ISD column. */
 export const RHD_SIGHT: Record<number, [number, number, number]> = { 30: [30, 60, 120], 40: [45, 90, 180], 50: [60, 120, 250], 65: [90, 180, 360], 80: [120, 250, 500], 100: [180, 360, 720] };
@@ -813,8 +823,6 @@ export function sightLength(kind: "crest" | "sag", A: number, S: number, k: numb
 }
 /** IRC sag comfort length L = 2(N·v³/C)^½, N = A/100, v in m/s, C = 0.6 m/s³. */
 export const sagComfortIRC = (A: number, V: number, C = 0.6) => 2 * Math.sqrt(((A / 100) * (V / 3.6) ** 3) / C);
-/** AASHTO sag comfort length L = AV²/395 (SI) or AV²/46.5 (US). */
-export const sagComfortAASHTO = (A: number, V: number, u: Units = "SI") => (A * V * V) / (u === "US" ? 46.5 : 395);
 
 export interface VerticalCurveInput {
   units?: Units;
@@ -932,9 +940,7 @@ export function verticalCurve(inp: VerticalCurveInput) {
   // Sag comfort
   if (kind === "sag" && V !== undefined) {
     if (std === "AASHTO") {
-      const Lc = sagComfortAASHTO(A, V, u);
-      steps.push(`Comfort (AASHTO): L = AV²/${u === "US" ? "46.5" : "395"} = ${f3(A)}×${V}²/${u === "US" ? "46.5" : "395"} = ${f2(Lc)} ${lu}`);
-      needed.push({ name: "comfort AV²/" + (u === "US" ? "46.5" : "395"), L: Lc });
+      notes.push("Sag curves are designed for headlight sight distance. Shorter comfort-based lengths (about 50% of the headlight length) are for special cases only, such as lighted ramps or an existing structure controlling the profile (TxDOT Roadway Design Manual 4.8.2).");
     } else {
       const Lc = sagComfortIRC(A, V);
       steps.push(`Comfort (IRC): L = 2(N·v³/C)^½ = 2×(${f3(A / 100)}×${f2(V / 3.6)}³/0.6)^½ = ${f2(Lc)} m`);

@@ -9,7 +9,7 @@ import {
   curveElements, deltaFromTangent, radiusFromExternal, horizontalCurve, formatChainage, parseChainage, deflectionTable,
   minRadius, roundAashtoRadius, aashtoMethod5, aashtoFmax, aashtoRunoff, safeSpeed, superelevationForFriction, ircSuperelevation,
   radiusSuperelevation, rhdSuperelevation, rhdTransition, rhdMinRadius, lgedTransition,
-  aashtoSSD, ircSSD, sightDistance, AASHTO_RELATIVE_GRADIENT, AASHTO_K, interpTable,
+  aashtoSSD, ircSSD, sightDistance, AASHTO_RELATIVE_GRADIENT, AASHTO_K, interpTable, IRC_SSD_FRICTION,
   sightLength, crestConstant, sagComfortIRC, verticalCurve, roadCrossSection, rhdWidening, lgedWidening,
 } from "@/lib/eng/roadgeo";
 import { ROAD_TOOLS } from "@/lib/tools/road-tools";
@@ -325,5 +325,18 @@ describe("Road tools run end to end", () => {
     }
     const us = await tool("curve_radius_superelevation").run(tool("curve_radius_superelevation").schema.parse({ standard: "AASHTO", units: "US", designSpeed: 60, radius: 2320 }));
     expect(us.summary).toMatch(/e = 6\.0%/);
+  });
+});
+
+describe("values checked against sources (not general knowledge)", () => {
+  it("IRC friction for SSD equals NPTEL Ch. 13 Table 13.1 (≤30: 0.40, 40: 0.38, 50: 0.37, 60: 0.36, ≥80: 0.35)", () => {
+    for (const [V, f] of [[30, 0.4], [40, 0.38], [50, 0.37], [60, 0.36], [80, 0.35], [100, 0.35]]) expect(interpTable(IRC_SSD_FRICTION, V).value).toBeCloseTo(f, 9);
+  });
+  it("relative gradient: Indiana Fig. 43-3E values only (20–120 km/h); above that the DOT value must be entered", () => {
+    expect(AASHTO_RELATIVE_GRADIENT.SI.at(-1)).toEqual([120, 0.38]);
+    expect(() => aashtoRunoff(130, 8)).toThrow(/relative gradient/);
+    expect(aashtoRunoff(130, 8, "SI", { relativeGradient: 0.35 }).relativeGradient).toBe(0.35);
+    expect(() => aashtoRunoff(80, 8, "US")).toThrow(/relative gradient/);
+    expect(aashtoRunoff(100, 6).relativeGradient).toBe(0.44);
   });
 });

@@ -220,7 +220,7 @@ export function requiredAverageStrength(inp: FcrInput): FcrResult {
     steps.push(`${rule}${us && !psiRules ? ` = ${fx(fcr / PSI_MPA)} psi` : ""}`);
     return { fcr: us && !psiRules ? fcr / PSI_MPA : fcr, fcrMPa: toMPa(fcr), unit: us ? "psi" : "MPa", hasData, rule, steps, notes };
   };
-  const src = inp.code === "BNBC2020" ? "BNBC 2020 Part 6 Sec. 5.6.2.2" : "ACI 318M-08 Sec. 5.3.2 (= ACI 301 for ACI 318-14/19)";
+  const src = inp.code === "BNBC2020" ? "BNBC 2020 Part 6 Sec. 5.6.2.2" : psiRules ? "ACI 318 as tabulated in PCA EB001 Table 9-11 and Eq. 9-1 to 9-3" : "ACI 318M-08 Sec. 5.3.2 (= ACI 301 for ACI 318-14/19)";
   let n = inp.numTests;
   if (inp.stdDev !== undefined && inp.stdDev > 0) {
     if (n === undefined) { n = 15; notes.push("Number of tests not given: 15 assumed (largest standard-deviation factor, 1.16)."); }

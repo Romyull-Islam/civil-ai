@@ -68,6 +68,7 @@ export const ROAD_TOOLS: ToolDef[] = [
       roadClass: z.enum(["upazila", "union", "village"]).optional().describe("LGED road class (Table-6 no-superelevation radius)"),
       laneWidth: z.number().positive().optional().describe("AASHTO runoff: lane width, default 3.6 m or 12 ft"),
       lanesRotated: z.number().min(1).max(3.5).optional().describe("AASHTO runoff: lanes rotated on one side of the axis, default 1"),
+      relativeGradient: z.number().positive().max(2).optional().describe("AASHTO runoff: maximum relative gradient Δ in % from your DOT manual; needed above 120 km/h (75 mph)"),
       normalCrossSlope: z.number().positive().max(5).optional().describe("AASHTO tangent runout: normal cross slope %, default 2"),
     }),
     run: (inp) => {

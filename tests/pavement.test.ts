@@ -240,3 +240,13 @@ describe("pavement tools", () => {
     expect(tool("pavement_flexible_aashto").schema.safeParse({ W18: 1e6, reliability: 40, MR: 5000 }).success).toBe(false);
   });
 });
+
+describe("RHD improved subgrade: the guide's own worked example decides the Table 6 / Appendix 1 conflict", () => {
+  it("Appendix 2 (subgrade CBR 3 %) uses 300 mm = Appendix 1 (default); Table 6 would give 150 mm", async () => {
+    const { rhdImprovedSubgrade } = await import("@/lib/eng/pavement");
+    expect(rhdImprovedSubgrade(3).thickness).toBe(300);
+    expect(rhdImprovedSubgrade(3, "table6").thickness).toBe(150);
+    expect(rhdImprovedSubgrade(4).thickness).toBe(250);
+    expect(rhdImprovedSubgrade(4, "table6").thickness).toBe(100);
+  });
+});
